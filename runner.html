@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>語音跑酷</title>
+<link rel="stylesheet" href="style.css?v=20261101171856">
+<style>
+  .cmds { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; }
+  .cmds div { background: var(--panel2); border-radius: 12px; padding: 8px 4px; transition: background .15s; }
+  .cmds div b { display: block; font-size: 1.3rem; }
+  .cmds div small { color: var(--muted); }
+  .cmds div.flash { background: var(--accent); color: #222; }
+  .cmds div.flash small { color: #444; }
+  .heard { min-height: 1.5em; margin-top: 10px; color: var(--muted); }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--bad); margin-right: 6px; }
+  .dot.on { background: var(--good); box-shadow: 0 0 8px var(--good); }
+  select { font: inherit; padding: 8px 10px; border-radius: 10px; background: var(--panel2); color: var(--text); border: 0; }
+  .pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 18px; }
+  .pick button { padding: 10px 6px; font-size: .9rem; }
+  .pick button small { display: block; font-weight: 400; opacity: .8; }
+  #levels span { cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="index.html">← 回首頁</a>
+    <h1>🏃 語音跑酷</h1>
+    <div class="levels" id="levels"></div>
+  </header>
+  <div class="err" id="err"></div>
+  <canvas id="cv" width="800" height="450"></canvas>
+  <div class="panel" style="margin-top:12px">
+    <div class="row" style="justify-content:space-between;margin-bottom:12px">
+      <div><span class="dot" id="dot"></span><span id="micState" class="muted">語音辨識未啟動</span></div>
+      <label class="row muted">辨識語言
+        <select id="lang">
+          <option value="zh-TW">中文</option>
+          <option value="en-US">English</option>
+        </select>
+      </label>
+    </div>
+    <div class="cmds">
+      <div id="c-left"><b>⬅️</b>左 / left<br><small>換車道</small></div>
+      <div id="c-right"><b>➡️</b>右 / right<br><small>換車道</small></div>
+      <div id="c-up"><b>⬆️</b>上・跳 / up・jump<br><small>跳過矮箱子</small></div>
+      <div id="c-down"><b>⬇️</b>下・蹲 / down・duck<br><small>蹲過橫桿</small></div>
+    </div>
+    <div class="heard" id="heard"></div>
+    <p class="muted" style="margin-bottom:0">提示：語音辨識會有約 0.5 秒延遲，看到障礙物就提早喊！也可以用鍵盤方向鍵操作。<br>
+      🟫 矮箱子：跳過或換車道　🟧 橫桿：蹲下或換車道　🟥 高牆：只能換車道</p>
+  </div>
+</div>
+
+<div class="overlay show" id="ov">
+  <div class="card">
+    <h2 id="ovTitle">語音跑酷</h2>
+    <p id="ovText" class="muted">用聲音喊「左、右、跳、蹲」（或 left / right / jump / duck）<br>閃過障礙物跑到終點！共 3 關，每關 3 顆愛心。</p>
+    <button id="ovBtn">開始遊戲</button>
+    <div class="muted" style="margin-top:18px">或直接選關：</div>
+    <div class="pick" id="pick"></div>
+  </div>
+</div>
+
+<script src="common.js?v=20261101171856"></script>
+<script>
+const LEVELS = [
+  { name: '暖身跑', speed: 11, every: 2.8, goal: 300, types: ['wall', 'block'], maxN: 1 },
+  { name: '加入橫桿', speed: 13, every: 2.3, goal: 450, types: ['wall', 'block', 'bar'], maxN: 2 },
+  { name: '極速挑戰', speed: 16, every: 1.9, goal: 600, types: ['wall', 'block', 'bar'], maxN: 3 },
+];
+const MAX_HEARTS = 3, LANE_W = 2, SPAWN_Z = 70, HORIZON = 120, CAM_H = 3;
+const GRAVITY = 30, JUMP_V = 10.5, DUCK_TIME = 0.9;
+const $ = (id) => document.getElementById(id);
+const cv = $('cv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+// ---------- 語音指令 ----------
+// 中文同音字也一併接受（例如「又」常被辨識成「右」的同音）
+const CMD_WORDS = {
+  left: ['left', 'lift', '左', '佐'],
+  right: ['right', 'write', 'rite', '右', '又', '幼'],
+  up: ['up', 'jump', '上', '跳', '條', '調'],
+  down: ['down', 'duck', 'dock', '下', '蹲', '嚇', '夏'],
+};
+const WORD_TO_CMD = {};
+for (const [cmd, ws] of Object.entries(CMD_WORDS)) for (const w of ws) WORD_TO_CMD[w] = cmd;
+const EN = Object.keys(WORD_TO_CMD).filter((w) => /^[a-z]+$/.test(w));
+const ZH = Object.keys(WORD_TO_CMD).filter((w) => !/^[a-z]+$/.test(w));
+const CMD_RE = new RegExp(`\\b(${EN.join('|')})\\b|(${ZH.join('|')})`, 'g');
+
+function parseCmds(text) {
+  return [...text.toLowerCase().matchAll(CMD_RE)].map((m) => WORD_TO_CMD[m[1] || m[2]]);
+}
+
+let rec = null, recOn = false, wantRec = false, consumed = [];
+
+function startRec() {
+  wantRec = true;
+  if (recOn || !SR) return;
+  rec = new SR();
+  rec.lang = $('lang').value;
+  rec.continuous = true;
+  rec.interimResults = true; // 用暫時結果降低延遲
+  consumed = [];
+  rec.onstart = () => {
+    recOn = true;
+    $('dot').classList.add('on');
+    $('micState').textContent = '語音辨識中（' + $('lang').selectedOptions[0].text + '）';
+  };
+  rec.onresult = (e) => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const text = e.results[i][0].transcript;
+      const cmds = parseCmds(text);
+      // 同一段辨識結果會隨時更新，只執行新出現的指令
+      const done = consumed[i] || 0;
+      for (let k = done; k < cmds.length; k++) doCmd(cmds[k]);
+      consumed[i] = Math.max(done, cmds.length);
+      $('heard').textContent = '聽到：' + text;
+    }
+  };
+  rec.onerror = (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      wantRec = false;
+      showError($('err'), '麥克風權限被拒絕，請在網址列允許麥克風後重新整理。');
+    } else if (e.error === 'network') {
+      showError($('err'), '語音辨識需要網路連線（Chrome 使用線上辨識服務）。');
+    }
+  };
+  rec.onend = () => {
+    recOn = false;
+    $('dot').classList.remove('on');
+    $('micState').textContent = '語音辨識未啟動';
+    if (wantRec) setTimeout(startRec, 100); // 辨識會自動中斷，持續重啟
+  };
+  rec.start();
+}
+
+function stopRec() {
+  wantRec = false;
+  if (rec && recOn) rec.abort();
+}
+
+// ---------- 遊戲狀態 ----------
+let state = 'idle'; // idle | play | over
+let levelIdx = 0, hearts = MAX_HEARTS, dist = 0, spawnT = 0, invuln = 0;
+let obstacles = [];
+let p = { lane: 0, x: 0, y: 0, vy: 0, duck: 0 };
+let banner = { text: '', t: 0 };
+
+const L = () => LEVELS[levelIdx];
+
+function doCmd(cmd) {
+  const el = $('c-' + cmd);
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 250);
+  banner = { text: { left: '⬅️ 左', right: '右 ➡️', up: '⬆️ 跳', down: '⬇️ 蹲' }[cmd], t: 0.6 };
+  if (state !== 'play') return;
+  if (cmd === 'left') p.lane = Math.max(-1, p.lane - 1);
+  if (cmd === 'right') p.lane = Math.min(1, p.lane + 1);
+  if (cmd === 'up' && p.y === 0) { p.vy = JUMP_V; p.duck = 0; sfx('good'); }
+  if (cmd === 'down') {
+    p.duck = DUCK_TIME;
+    if (p.y > 0) p.vy = -15; // 空中快速落地
+  }
+}
+
+addEventListener('keydown', (e) => {
+  const k = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ' ': 'up', ArrowDown: 'down' }[e.key];
+  if (k && state === 'play') { e.preventDefault(); doCmd(k); }
+});
+
+function overlay(title, text, btn, onClick) {
+  $('ovTitle').textContent = title;
+  $('ovText').innerHTML = text;
+  $('ovBtn').textContent = btn;
+  $('ovBtn').onclick = onClick;
+  $('ov').classList.add('show');
+}
+
+function renderLevels(doneCount = levelIdx) {
+  [...$('levels').children].forEach((el, i) => {
+    el.className = i < doneCount ? 'done' : i === doneCount ? 'on' : '';
+  });
+}
+
+function startLevel(i) {
+  $('ov').classList.remove('show');
+  if (!SR) {
+    showError($('err'), '此瀏覽器不支援語音辨識，請改用 Chrome 或 Edge（也可以先用鍵盤方向鍵玩）。');
+  }
+  if (!Mic.ctx) Mic.ctx = new (window.AudioContext || window.webkitAudioContext)(); // 只用來播放音效
+  levelIdx = i; hearts = MAX_HEARTS; dist = 0; spawnT = 1.5; invuln = 0;
+  obstacles = [];
+  p = { lane: 0, x: 0, y: 0, vy: 0, duck: 0 };
+  renderLevels();
+  state = 'play';
+  startRec();
+}
+
+function spawn() {
+  const n = 1 + Math.floor(Math.random() * L().maxN);
+  const lanes = [-1, 0, 1].sort(() => Math.random() - 0.5).slice(0, n);
+  const row = lanes.map((lane) => ({ lane, z: SPAWN_Z, type: L().types[Math.floor(Math.random() * L().types.length)] }));
+  // 至少留一條可以通過的路
+  if (row.length === 3 && row.every((o) => o.type === 'wall')) row[0].type = 'block';
+  obstacles.push(...row);
+}
+
+function hit() {
+  hearts--;
+  invuln = 1.5;
+  sfx('bad');
+  if (hearts <= 0) {
+    state = 'over';
+    overlay('💥 跌倒了！', `第 ${levelIdx + 1} 關：跑了 ${dist.toFixed(0)} / ${L().goal} 公尺`, '再試一次', () => startLevel(levelIdx));
+  }
+}
+
+function clearLevel() {
+  state = 'over';
+  sfx('win');
+  renderLevels(levelIdx + 1);
+  if (levelIdx + 1 >= LEVELS.length) {
+    overlay('🏆 全部通關！', '你是語音跑酷王！', '從第 1 關重玩', () => startLevel(0));
+  } else {
+    overlay(`🎉 第 ${levelIdx + 1} 關過關！`, `下一關：${LEVELS[levelIdx + 1].name}（更快、障礙更多）`, `挑戰第 ${levelIdx + 2} 關`, () => startLevel(levelIdx + 1));
+  }
+}
+
+function update(dt) {
+  if (banner.t > 0) banner.t -= dt;
+  if (state !== 'play') return;
+  const sp = L().speed;
+  dist += sp * dt;
+  if (dist >= L().goal) return clearLevel();
+
+  spawnT -= dt;
+  if (spawnT <= 0) { spawn(); spawnT = L().every; }
+
+  // 玩家移動
+  p.x += (p.lane * LANE_W - p.x) * Math.min(1, dt * 12);
+  if (p.y > 0 || p.vy > 0) {
+    p.vy -= GRAVITY * dt;
+    p.y = Math.max(0, p.y + p.vy * dt);
+    if (p.y === 0) p.vy = 0;
+  }
+  if (p.duck > 0) p.duck -= dt;
+  if (invuln > 0) invuln -= dt;
+
+  const ducking = p.duck > 0;
+  for (const o of obstacles) {
+    o.z -= sp * dt;
+    if (o.hit || invuln > 0 || Math.abs(o.z) > 0.6 || Math.abs(p.x - o.lane * LANE_W) > 1.2) continue;
+    const top = p.y + (ducking ? 0.9 : 1.8);
+    const collide =
+      o.type === 'wall' ||
+      (o.type === 'block' && p.y < 0.9) ||
+      (o.type === 'bar' && top > 1.1 && p.y < 2.4);
+    if (collide) { o.hit = true; hit(); if (state !== 'play') return; }
+  }
+  obstacles = obstacles.filter((o) => o.z > -3);
+}
+
+// ---------- 繪圖（偽 3D） ----------
+function proj(x, h, z) {
+  const s = 300 / (z + 3);
+  return [W / 2 + x * s, HORIZON + (CAM_H - h) * s, s];
+}
+
+function quad(pts, color) {
+  g.fillStyle = color;
+  g.beginPath();
+  pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+  g.closePath();
+  g.fill();
+}
+
+// 立體方塊：x 中心、寬 w、高度 h0~h1、深度 1
+function box(x, z, w, h0, h1, front, top) {
+  const a = proj(x - w / 2, h1, z), b = proj(x + w / 2, h1, z);
+  const c = proj(x + w / 2, h0, z), d = proj(x - w / 2, h0, z);
+  const a2 = proj(x - w / 2, h1, z + 1), b2 = proj(x + w / 2, h1, z + 1);
+  quad([a2, b2, b, a], top);
+  quad([a, b, c, d], front);
+}
+
+function drawObstacle(o) {
+  const x = o.lane * LANE_W;
+  if (o.type === 'wall') box(x, o.z, 1.8, 0, 2.6, '#e03131', '#ff6b6b');
+  if (o.type === 'block') box(x, o.z, 1.6, 0, 0.9, '#9c6644', '#c08457');
+  if (o.type === 'bar') {
+    box(x - 0.85, o.z, 0.12, 0, 1.1, '#555', '#777');
+    box(x + 0.85, o.z, 0.12, 0, 1.1, '#555', '#777');
+    box(x, o.z, 1.9, 1.1, 1.6, '#f08c00', '#ffa94d');
+  }
+}
+
+function drawPlayer() {
+  if (invuln > 0 && Math.floor(invuln * 10) % 2) return; // 受傷閃爍
+  const [sx, gy] = proj(p.x, 0, 0);
+  const s = 100;
+  g.fillStyle = 'rgba(0,0,0,.3)';
+  g.beginPath(); g.ellipse(sx, gy, 40 - p.y * 8, 10, 0, 0, Math.PI * 2); g.fill();
+  const ducking = p.duck > 0;
+  const bodyH = (ducking ? 0.9 : 1.8) * s;
+  const by = gy - p.y * s;
+  const run = state === 'play' && p.y === 0 ? Math.sin(performance.now() / 70) * 8 : 0;
+  // 腳
+  g.strokeStyle = '#1c3d7a'; g.lineWidth = 12; g.lineCap = 'round';
+  const hip = by - bodyH * 0.4;
+  g.beginPath(); g.moveTo(sx - 8, hip); g.lineTo(sx - 12 + run, by - 4); g.stroke();
+  g.beginPath(); g.moveTo(sx + 8, hip); g.lineTo(sx + 12 - run, by - 4); g.stroke();
+  // 身體
+  g.fillStyle = '#4dabf7';
+  g.beginPath(); g.roundRect(sx - 24, by - bodyH * 0.8, 48, bodyH * 0.45, 14); g.fill();
+  // 頭
+  g.fillStyle = '#ffd8a8';
+  g.beginPath(); g.arc(sx, by - bodyH * 0.8 - 16, 20, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#e8590c';
+  g.beginPath(); g.arc(sx, by - bodyH * 0.8 - 22, 20, Math.PI, 0); g.fill();
+}
+
+function draw() {
+  const sky = g.createLinearGradient(0, 0, 0, HORIZON);
+  sky.addColorStop(0, '#4dabf7'); sky.addColorStop(1, '#d0ebff');
+  g.fillStyle = sky; g.fillRect(0, 0, W, HORIZON);
+  g.fillStyle = '#69db7c'; g.fillRect(0, HORIZON, W, H - HORIZON);
+
+  // 跑道
+  const far = 80;
+  quad([proj(-3, 0, far), proj(3, 0, far), proj(3, 0, -2.5), proj(-3, 0, -2.5)], '#495057');
+  // 移動的地面條紋
+  for (let k = 0; k < 11; k++) {
+    const z = k * 8 - (dist % 8);
+    if (z < -2.5 || z > far) continue;
+    quad([proj(-3, 0, z + 4), proj(3, 0, z + 4), proj(3, 0, z), proj(-3, 0, z)], '#3f454b');
+  }
+  g.strokeStyle = '#f8f9fa'; g.lineWidth = 3;
+  for (const lx of [-3, -1, 1, 3]) {
+    const [x1, y1] = proj(lx, 0, far), [x2, y2] = proj(lx, 0, -2.5);
+    g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
+  }
+
+  const sorted = [...obstacles].sort((a, b) => b.z - a.z);
+  sorted.filter((o) => o.z > 0).forEach(drawObstacle);
+  drawPlayer();
+  sorted.filter((o) => o.z <= 0).forEach(drawObstacle);
+
+  // HUD
+  g.fillStyle = 'rgba(0,0,0,.35)';
+  g.beginPath(); g.roundRect(12, 12, 300, 62, 12); g.fill();
+  g.fillStyle = '#fff'; g.font = 'bold 18px sans-serif'; g.textAlign = 'left';
+  g.fillText(`第 ${levelIdx + 1} 關　${'❤️'.repeat(Math.max(0, hearts))}${'🤍'.repeat(MAX_HEARTS - Math.max(0, hearts))}`, 24, 38);
+  const goal = L().goal;
+  const prog = Math.min(1, dist / goal);
+  g.fillStyle = 'rgba(255,255,255,.3)'; g.fillRect(24, 50, 270, 10);
+  g.fillStyle = '#ffcf4a'; g.fillRect(24, 50, 270 * prog, 10);
+
+  if (banner.t > 0) {
+    g.globalAlpha = Math.min(1, banner.t / 0.3);
+    g.fillStyle = '#fff'; g.font = 'bold 44px sans-serif'; g.textAlign = 'center';
+    g.strokeStyle = 'rgba(0,0,0,.5)'; g.lineWidth = 6;
+    g.strokeText(banner.text, W / 2, 100); g.fillText(banner.text, W / 2, 100);
+    g.globalAlpha = 1;
+  }
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ---------- 介面 ----------
+$('levels').innerHTML = LEVELS.map((Lv, i) => `<span title="${Lv.name}">第${i + 1}關</span>`).join('');
+$('pick').innerHTML = LEVELS.map((Lv, i) => `<button class="secondary" data-i="${i}">第 ${i + 1} 關<small>${Lv.name}</small></button>`).join('');
+$('pick').onclick = (e) => { const b = e.target.closest('button'); if (b) startLevel(Number(b.dataset.i)); };
+$('levels').onclick = (e) => {
+  const i = [...$('levels').children].indexOf(e.target);
+  if (i >= 0) startLevel(i);
+};
+$('ovBtn').onclick = () => startLevel(0);
+$('lang').onchange = () => { if (rec && recOn) rec.abort(); }; // onend 會用新語言重啟
+renderLevels();
+</script>
+</body>
+</html>

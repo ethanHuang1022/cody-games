@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>健身勇者</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <video id="cam" autoplay playsinline muted></video>
+  <button id="mute" title="靜音（M）">🔊</button>
+  <a id="home" href="../">⬅ 首頁</a>
+
+  <div id="overlay">
+    <h1>健身勇者</h1>
+    <p id="status">載入姿勢模型中…</p>
+    <div id="result"></div>
+    <ul class="help">
+      <li>怪物身上會顯示一個<b>動作</b>，做出那個動作就能攻擊它</li>
+      <li>🏋️ 深蹲　🤸 開合跳　👊 左／右手側拳　🦵 抬膝</li>
+      <li>⏱️ 怪物的倒數歸零就會打你，動作越快越好</li>
+      <li>📏 離鏡頭約 2～3 公尺，讓<b>頭到腳</b>都入鏡</li>
+    </ul>
+    <p class="hint">🙌 雙手舉高過頭撐 1 秒即可開始　·　M = 靜音　·　先點一下畫面才會有聲音</p>
+    <button id="start" disabled>開始</button>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>

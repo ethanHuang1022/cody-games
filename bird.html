@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>聲控小鳥</title>
+<link rel="stylesheet" href="style.css?v=20261101171856">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="index.html">← 回首頁</a>
+    <h1>🐤 聲控小鳥</h1>
+    <div class="levels" id="levels"><span>第1關</span><span>第2關</span><span>第3關</span></div>
+  </header>
+  <div class="err" id="err"></div>
+  <canvas id="cv" width="800" height="450"></canvas>
+  <div class="panel" style="margin-top:12px">
+    <div class="row" style="justify-content:space-between">
+      <div style="flex:1;min-width:200px">
+        <div class="muted" style="margin-bottom:6px">目前音量</div>
+        <div class="meter"><div id="vol"></div></div>
+      </div>
+      <label class="row muted">靈敏度
+        <input type="range" id="sens" min="12" max="45" value="28">
+      </label>
+      <button class="secondary" id="recal">重新校正環境噪音</button>
+    </div>
+    <p class="muted" style="margin-bottom:0">玩法：發出聲音（「啊～」）小鳥會往上，聲音越大飛越高；安靜時小鳥會降到底部。穿過所有水管就過關！</p>
+  </div>
+</div>
+
+<div class="overlay show" id="ov">
+  <div class="card">
+    <h2 id="ovTitle">聲控小鳥</h2>
+    <p id="ovText" class="muted">用音量控制小鳥高度，共 3 關。<br>開始前會先花 1 秒偵測環境噪音，請保持安靜。</p>
+    <button id="ovBtn">開始遊戲</button>
+  </div>
+</div>
+
+<script src="common.js?v=20261101171856"></script>
+<script>
+const LEVELS = [
+  { speed: 150, gap: 200, spacing: 340, count: 6,  maxShift: 120 },
+  { speed: 190, gap: 165, spacing: 300, count: 10, maxShift: 180 },
+  { speed: 230, gap: 140, spacing: 280, count: 14, maxShift: 260 },
+];
+const cv = document.getElementById('cv');
+const g = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+const GROUND = 30, PIPE_W = 70, BIRD_X = 160, BIRD_R = 20;
+const HEAD_H = 56; // 頭像顯示高度
+const $ = (id) => document.getElementById(id);
+
+let state = 'idle';       // idle | calib | play | over
+let levelIdx = 0;
+let floorDb = -60;
+let bird = { y: H - GROUND - BIRD_R, vy: 0 };
+let pipes = [], spawned = 0, passed = 0;
+let level = 0;            // 0~1 音量等級
+let scroll = 0;
+let last = performance.now();
+const clouds = Array.from({ length: 6 }, (_, i) => ({ x: i * 150, y: 30 + Math.random() * 120, s: 0.6 + Math.random() * 0.8 }));
+
+function renderLevels() {
+  [...$('levels').children].forEach((el, i) => {
+    el.className = i < levelIdx ? 'done' : i === levelIdx ? 'on' : '';
+  });
+}
+
+function overlay(title, text, btn, onClick) {
+  $('ovTitle').textContent = title;
+  $('ovText').innerHTML = text;
+  $('ovBtn').textContent = btn;
+  $('ovBtn').onclick = onClick;
+  $('ov').classList.add('show');
+}
+
+async function calibrate() {
+  state = 'calib';
+  const samples = [];
+  const t0 = performance.now();
+  await new Promise((res) => {
+    const tick = () => {
+      samples.push(Mic.db());
+      if (performance.now() - t0 < 1000) requestAnimationFrame(tick); else res();
+    };
+    tick();
+  });
+  samples.sort((a, b) => a - b);
+  floorDb = samples[Math.floor(samples.length / 2)];
+}
+
+function resetLevel() {
+  pipes = []; spawned = 0; passed = 0;
+  bird.y = H - GROUND - BIRD_R; bird.vy = 0;
+}
+
+function spawnPipe() {
+  const L = LEVELS[levelIdx];
+  const minY = L.gap / 2 + 20, maxY = H - GROUND - L.gap / 2 - 10;
+  const prev = pipes.length ? pipes[pipes.length - 1].gy : (minY + maxY) / 2;
+  let gy = prev + (Math.random() * 2 - 1) * L.maxShift;
+  gy = Math.max(minY, Math.min(maxY, gy));
+  pipes.push({ x: W + 40, gy, passed: false });
+  spawned++;
+}
+
+async function startLevel() {
+  $('ov').classList.remove('show');
+  try {
+    await Mic.start();
+  } catch (e) {
+    showError($('err'), '無法使用麥克風：' + e.message);
+    return;
+  }
+  if (state === 'idle') await calibrate();
+  resetLevel();
+  renderLevels();
+  state = 'play';
+}
+
+function die() {
+  state = 'over';
+  sfx('bad');
+  overlay('撞到了！', `第 ${levelIdx + 1} 關：通過 ${passed} / ${LEVELS[levelIdx].count} 根水管`, '再試一次', startLevel);
+}
+
+function clearLevel() {
+  state = 'over';
+  sfx('win');
+  levelIdx++;
+  renderLevels();
+  if (levelIdx >= LEVELS.length) {
+    overlay('🏆 全部通關！', '你是聲控飛行大師！', '從第 1 關重玩', () => { levelIdx = 0; startLevel(); });
+  } else {
+    overlay(`🎉 第 ${levelIdx} 關過關！`, `下一關：水管更多、更窄、速度更快`, `挑戰第 ${levelIdx + 1} 關`, startLevel);
+  }
+}
+
+function update(dt) {
+  if (state === 'calib' || state === 'idle') return;
+  const db = Mic.db();
+  const range = Number($('sens').max) + Number($('sens').min) - Number($('sens').value); // 右邊 = 更靈敏
+  level = Math.max(0, Math.min(1, (db - floorDb - 6) / range));
+  $('vol').style.width = (level * 100).toFixed(0) + '%';
+  if (state !== 'play') return;
+
+  const L = LEVELS[levelIdx];
+  scroll += L.speed * dt;
+
+  // 音量決定目標高度，小鳥平滑移動過去
+  const top = BIRD_R + 4, bottom = H - GROUND - BIRD_R;
+  const target = bottom - level * (bottom - top);
+  bird.vy = (target - bird.y) * 8;
+  bird.y += bird.vy * dt;
+
+  if (spawned < L.count && (pipes.length === 0 || pipes[pipes.length - 1].x < W + 40 - L.spacing)) spawnPipe();
+
+  for (const p of pipes) {
+    p.x -= L.speed * dt;
+    if (!p.passed && p.x + PIPE_W < BIRD_X - BIRD_R) { p.passed = true; passed++; sfx('good'); }
+    // 碰撞
+    const inX = BIRD_X + BIRD_R > p.x && BIRD_X - BIRD_R < p.x + PIPE_W;
+    if (inX && (bird.y - BIRD_R + 3 < p.gy - L.gap / 2 || bird.y + BIRD_R - 3 > p.gy + L.gap / 2)) return die();
+  }
+  pipes = pipes.filter((p) => p.x > -PIPE_W - 10);
+  if (passed >= L.count) clearLevel();
+}
+
+function drawBird() {
+  g.save();
+  g.translate(BIRD_X, bird.y);
+  g.rotate(Math.max(-0.5, Math.min(0.5, bird.vy / 600)));
+  // 翅膀：有聲音時拍動
+  const flap = level > 0.05 ? Math.sin(performance.now() / 50) * 0.5 : 0;
+  g.fillStyle = '#fff';
+  g.strokeStyle = '#adb5bd';
+  g.lineWidth = 1.5;
+  for (const side of [-1, 1]) {
+    g.save();
+    g.translate(side * 17, 10);
+    g.rotate(side * (-0.5 + flap));
+    g.beginPath(); g.ellipse(side * 10, 0, 13, 7, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+    g.restore();
+  }
+  if (!drawHead(g, 0, -4, HEAD_H)) {
+    // 頭像載入失敗時用原本的小黃鳥
+    g.fillStyle = '#ffd43b';
+    g.beginPath(); g.arc(0, 0, BIRD_R, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#222';
+    g.beginPath(); g.arc(7, -5, 3, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#ff6b35';
+    g.beginPath(); g.moveTo(BIRD_R - 3, -1); g.lineTo(BIRD_R + 7, 3); g.lineTo(BIRD_R - 3, 7); g.fill();
+  }
+  g.restore();
+}
+
+function draw() {
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#5ec8ff'); sky.addColorStop(1, '#bfeaff');
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+
+  g.fillStyle = 'rgba(255,255,255,.85)';
+  for (const c of clouds) {
+    const x = ((c.x - scroll * 0.2 * c.s) % (W + 200) + W + 200) % (W + 200) - 100;
+    g.beginPath();
+    g.arc(x, c.y, 22 * c.s, 0, Math.PI * 2);
+    g.arc(x + 25 * c.s, c.y - 10 * c.s, 26 * c.s, 0, Math.PI * 2);
+    g.arc(x + 52 * c.s, c.y, 20 * c.s, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  const L = LEVELS[levelIdx] || LEVELS[2];
+  for (const p of pipes) {
+    const topH = p.gy - L.gap / 2, botY = p.gy + L.gap / 2;
+    g.fillStyle = '#3cb043';
+    g.fillRect(p.x, 0, PIPE_W, topH);
+    g.fillRect(p.x, botY, PIPE_W, H - GROUND - botY);
+    g.fillStyle = '#2d8a33';
+    g.fillRect(p.x - 5, topH - 22, PIPE_W + 10, 22);
+    g.fillRect(p.x - 5, botY, PIPE_W + 10, 22);
+  }
+
+  g.fillStyle = '#d9a066'; g.fillRect(0, H - GROUND, W, GROUND);
+  g.fillStyle = '#7cc142'; g.fillRect(0, H - GROUND, W, 6);
+
+  drawBird();
+
+  g.fillStyle = '#123';
+  g.font = 'bold 22px sans-serif';
+  if (state === 'calib') {
+    g.textAlign = 'center';
+    g.fillText('偵測環境噪音中，請保持安靜…', W / 2, H / 2);
+  } else if (levelIdx < LEVELS.length) {
+    g.textAlign = 'left';
+    g.fillText(`第 ${levelIdx + 1} 關   ${passed} / ${LEVELS[levelIdx].count}`, 16, 32);
+  }
+}
+
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+$('ovBtn').onclick = startLevel;
+$('recal').onclick = async () => {
+  if (!Mic.ctx) return;
+  const prev = state;
+  await calibrate();
+  state = prev === 'calib' ? 'play' : prev;
+};
+renderLevels();
+</script>
+</body>
+</html>

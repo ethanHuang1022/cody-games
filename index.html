@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cody的聲控遊戲館</title>
+<link rel="stylesheet" href="style.css?v=20261101171856">
+<style>
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .game {
+    display: block; text-decoration: none; color: var(--text);
+    background: var(--panel); border-radius: 20px; padding: 24px;
+    transition: transform .15s, background .15s;
+  }
+  .game:hover { transform: translateY(-4px); background: var(--panel2); }
+  .game .icon { font-size: 3rem; }
+  .game h2 { margin: 8px 0; }
+  .game p { color: var(--muted); margin: 0; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top"><h1>🎤 Cody的聲控遊戲館</h1></header>
+  <p class="muted">用你的聲音來玩！第一次進入遊戲時，瀏覽器會詢問麥克風權限，請按「允許」。建議使用 Chrome 或 Edge。</p>
+  <div class="grid">
+    <a class="game" href="bird.html">
+      <div class="icon">🐤</div>
+      <h2>聲控小鳥</h2>
+      <p>音量越大飛越高，安靜就往下降。穿過水管，共 3 關。</p>
+    </a>
+    <a class="game" href="word.html">
+      <div class="icon">🗣️</div>
+      <h2>英文發音闖關</h2>
+      <p>聽系統念出單字或句子，念對了頭像就能穿過洞口往上爬。120 個單字＋隨機句子，共 6 關（含地獄級繞口令）。</p>
+    </a>
+    <a class="game" href="pitch.html">
+      <div class="icon">🎵</div>
+      <h2>音準挑戰</h2>
+      <p>聽目標音，用聲音唱到同一個音並穩住。單音 → 音程 → 小星星旋律，共 3 關。</p>
+    </a>
+    <a class="game" href="runner.html">
+      <div class="icon">🏃</div>
+      <h2>語音跑酷</h2>
+      <p>喊「左、右、跳、蹲」或 left / right / jump / duck 控制角色閃避障礙，共 3 關。</p>
+    </a>
+    <a class="game" href="mario.html">
+      <div class="icon">🍄</div>
+      <h2>聲控大冒險</h2>
+      <p>有聲音就前進、越大聲越快，突然大聲就跳、越大聲跳越高，安靜時會往回走。吃火焰花後說「fire」或「發射」發射火焰。共 8 關含 2 場魔王戰，記錄過關時間。</p>
+    </a>
+    <a class="game" href="motion/">
+      <div class="icon">🕺</div>
+      <h2>動感遊戲廳</h2>
+      <p>改用攝影機玩！用手、身體和臉部動作控制的 15 個小遊戲，還有雙人對戰。</p>
+    </a>
+  </div>
+</div>
+</body>
+</html>

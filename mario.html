@@ -1,0 +1,900 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>聲控大冒險</title>
+<link rel="stylesheet" href="style.css?v=20261101171856">
+<style>
+  .pick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 18px; }
+  .pick button { padding: 8px 4px; font-size: .85rem; }
+  .pick button small { display: block; font-weight: 400; opacity: .8; }
+  .overlay .card { max-width: 520px; }
+  #levels { flex-wrap: wrap; justify-content: flex-end; }
+  #levels span { cursor: pointer; }
+  .meter { position: relative; }
+  .meter i { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; opacity: .7; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--bad); margin-right: 6px; }
+  .dot.on { background: var(--good); box-shadow: 0 0 8px var(--good); }
+  select { font: inherit; padding: 6px 10px; border-radius: 10px; background: var(--panel2); color: var(--text); border: 0; }
+  .meters { flex: 1; min-width: 240px; display: grid; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="index.html">← 回首頁</a>
+    <h1>🍄 聲控大冒險</h1>
+    <div class="levels" id="levels"></div>
+  </header>
+  <div class="err" id="err"></div>
+  <canvas id="cv" width="800" height="448"></canvas>
+  <div class="panel" style="margin-top:12px">
+    <div class="row" style="justify-content:space-between;align-items:flex-end">
+      <div class="meters">
+        <div class="muted">音量（白線：前進門檻 / 跳躍門檻）</div>
+        <div class="meter"><div id="vol"></div><i id="mkMove"></i><i id="mkJump"></i></div>
+        <div class="muted"><span class="dot" id="dot"></span><span id="recState">語音辨識未啟動</span>　🔥 說「fire」或「發射」發射火焰</div>
+        <div class="muted" id="heard">聽到：—</div>
+      </div>
+      <div style="display:grid;gap:6px">
+        <label class="row muted">音量靈敏度 <input type="range" id="sens" min="12" max="45" value="28"></label>
+        <label class="row muted">辨識語言
+          <select id="lang"><option value="zh-TW">中文</option><option value="en-US">English</option></select>
+        </label>
+      </div>
+      <button class="secondary" id="recal">重新校正環境噪音</button>
+    </div>
+    <p class="muted" style="margin-bottom:0">
+      🔉 有聲音：往前走，越大聲走越快　🔇 沒聲音：慢慢往回走<br>
+      📢 突然大聲喊「啊！」：跳！越大聲跳越高（起跳後繼續加大音量會跳更高）<br>
+      🌸 撞 🌸 磚塊會長出火焰花，吃到後說「fire」或「發射」就能發射火焰（火焰狀態被打到只會失去火焰）<br>
+      👹 魔王：踩頭扣 2 血、火焰扣 1 血。鍵盤備用：→ 前進、空白鍵 跳、F 發射火焰。
+    </p>
+  </div>
+</div>
+
+<div class="overlay show" id="ov">
+  <div class="card">
+    <h2 id="ovTitle">聲控大冒險</h2>
+    <p id="ovText" class="muted">用聲音控制角色走路、跳躍和發射火焰，跑到終點旗子就過關！<br>共 8 關，第 4、8 關有魔王，每關 3 條命。<br>開始前會先花 1 秒偵測環境噪音，請保持安靜。</p>
+    <button id="ovBtn">開始遊戲</button>
+    <div class="muted" style="margin-top:18px">或直接選關（顯示最佳紀錄）：</div>
+    <div class="pick" id="pick"></div>
+  </div>
+</div>
+
+<script src="common.js?v=20261101171856"></script>
+<script>
+// 關卡語法：g=地面 _=坑洞 p=水管(高) u=上階梯 n=下階梯 r=磚塊平台 q=問號磚 f=火焰花磚
+//           o=金幣 e=敵人 k=存檔點 F=終點 X=魔王房間(數字=魔王種類)
+// 數字是長度或高度；r、q、f、o、e、k 不會往前推進
+const LEVELS = [
+  { name: '草原散步', theme: 'day', map:
+    'g14 o4 g4 q g6 _2 g8 e g8 p2 g8 o5 g6 _2 g6 u3 g2 n3 g6 k g8 e g6 p2 g6 r4 g8 _2 g8 e g10 F' },
+  { name: '水管山丘', theme: 'day', map:
+    'g12 q g2 f g6 o4 e g6 p3 g6 _3 g6 e g4 e g6 p4 g4 r5 _3 g6 u4 _2 n4 k g6 o5 e g4 p3 g4 p4 g6 _3 g4 e g6 u5 g2 F' },
+  { name: '天空挑戰', theme: 'day', map:
+    'g10 o4 e g6 _3 g4 r4 _4 g6 p4 g4 e g4 e g6 _4 g4 u5 _3 n5 k g2 f g4 r3 _3 g2 r3 _3 g4 e g4 p4 g3 _4 g4 e g2 e g6 u6 g2 F' },
+  { name: '👹 魔王城堡', theme: 'castle', map:
+    'g10 f g6 e g6 _3 g4 p3 g6 _4 g4 e g4 u4 _3 n4 g6 e g4 e g6 k g4 f g6 X1' },
+  { name: '地下洞窟', theme: 'cave', map:
+    'g10 f g8 e g4 e g6 p3 g4 _3 g4 r4 _4 g4 q g4 e g6 p4 g2 _3 g6 k g6 e g4 e g4 u5 _4 n5 g4 o6 g8 e g6 F' },
+  { name: '夕陽峽谷', theme: 'sunset', map:
+    'g10 o4 g4 _4 g4 r3 _3 g2 r3 _3 g4 f g6 e g4 _5 g3 e g4 p4 _3 g6 k g4 u3 _4 n3 g2 _4 g4 e g2 e g4 r4 _4 g6 F' },
+  { name: '夜晚高塔', theme: 'night', map:
+    'g10 e g4 e g6 p3 g2 p4 g4 f g6 _3 g4 u6 _3 n6 g4 e g2 e g2 e g6 k g6 p4 _3 p4 g4 e g4 r4 _4 g4 e g4 u4 g2 u6 g2 F' },
+  { name: '👹 最終決戰', theme: 'castle', map:
+    'g10 f g6 e g4 e g6 _4 g4 p4 g4 _4 g4 e g4 e g4 u5 _4 n5 g6 f g4 e g6 k g4 X2' },
+];
+const THEMES = {
+  day:    { sky: ['#5c94fc', '#a5c8ff'], hill: '#8ce99a', ground: ['#c56a2c', '#9a4f1e'], clouds: true },
+  cave:   { sky: ['#14142a', '#2d2d48'], hill: '#262640', ground: ['#5a6b8c', '#3d4a63'] },
+  sunset: { sky: ['#ff7b54', '#ffd29d'], hill: '#e0915a', ground: ['#b5651d', '#7f4513'], clouds: true },
+  night:  { sky: ['#0b1d3a', '#27416b'], hill: '#1e3a5c', ground: ['#6b5b95', '#4a3f6b'], stars: true },
+  castle: { sky: ['#2b0f0f', '#5c1f1f'], hill: '#3d1515', ground: ['#7a7a7a', '#4f4f4f'], lava: true },
+};
+const BOSSES = {
+  1: { name: '火焰龜王', hp: 6, every: 2.4, jumpEvery: 4, speed: 70, spread: 1 },
+  2: { name: '暗黑龍王', hp: 12, every: 1.6, jumpEvery: 2.6, speed: 110, spread: 3 },
+};
+const T = 32, ROWS = 14, GROUND_ROW = 12, MAX_LIVES = 3, ARENA_W = 25;
+const SOLID = new Set(['#', 'B', '?', 'U', 'P', 'S', 'R', 'W']);
+const GRAVITY = 1800;
+const MOVE_MIN = 0.06;        // 超過這個音量就前進
+const JUMP_MIN = 0.4;         // 跳躍需要的最低音量
+const JUMP_DIFF = 0.28;       // 音量突然增加這麼多就算「忽然大聲」
+const $ = (id) => document.getElementById(id);
+const cv = $('cv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+
+// ---------- 最佳紀錄（只存在這台瀏覽器） ----------
+const BEST_KEY = 'voice-mario-best';
+function loadBest() {
+  try { return JSON.parse(localStorage.getItem(BEST_KEY)) || {}; } catch { return {}; }
+}
+function saveBest(b) {
+  try { localStorage.setItem(BEST_KEY, JSON.stringify(b)); } catch {}
+}
+const fmtTime = (s) => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+
+// ---------- 地圖 ----------
+function buildMap(src) {
+  const cols = [];      // 每一欄一個長度 ROWS 的陣列
+  const enemies = [], coins = [];
+  let checkpoint = null, flag = 0, arena = null;
+  const col = () => { const c = Array(ROWS).fill('.'); cols.push(c); return c; };
+  const later = []; // 磚塊等疊在地形上的物件，地形建好後再放
+  const at = (x, r, ch) => later.push([x, r, ch]);
+  const ground = (c) => { c[GROUND_ROW] = '#'; c[GROUND_ROW + 1] = '#'; };
+  for (const [, k, nStr] of src.matchAll(/([a-zA-Z_])(\d*)/g)) {
+    const n = Number(nStr || 1), x = cols.length;
+    if (k === 'g') for (let i = 0; i < n; i++) ground(col());
+    if (k === '_') for (let i = 0; i < n; i++) col();
+    if (k === 'p') for (let i = 0; i < 2; i++) { const c = col(); ground(c); for (let h = 1; h <= n; h++) c[GROUND_ROW - h] = 'P'; }
+    if (k === 'u' || k === 'n') for (let i = 0; i < n; i++) {
+      const c = col(); ground(c);
+      const hgt = k === 'u' ? i + 1 : n - i;
+      for (let h = 1; h <= hgt; h++) c[GROUND_ROW - h] = 'S';
+    }
+    if (k === 'r') for (let i = 0; i < n; i++) at(x + i, GROUND_ROW - 3, 'B');
+    if (k === 'q') at(x, GROUND_ROW - 4, '?');
+    if (k === 'f') at(x, GROUND_ROW - 4, 'R');
+    if (k === 'o') for (let i = 0; i < n; i++) coins.push({ x: (x + i) * T + 8, y: (GROUND_ROW - 2) * T + 4, got: false });
+    if (k === 'e') enemies.push({ x: x * T + 3, y: (GROUND_ROW - 1) * T + 4, w: 26, h: 28, vx: -45, vy: 0, alive: true, squash: 0 });
+    if (k === 'k') checkpoint = x;
+    if (k === 'F') { flag = x + 2; for (let i = 0; i < 8; i++) ground(col()); }
+    if (k === 'X') {
+      for (let i = 0; i < ARENA_W; i++) ground(col());
+      arena = { x0: x, x1: x + ARENA_W, type: n, locked: false };
+      flag = x + ARENA_W - 4;
+    }
+  }
+  for (const [x, r, ch] of later) if (x < cols.length) cols[x][r] = ch;
+  // 地圖轉成 [row][col]
+  const grid = Array.from({ length: ROWS }, (_, r) => cols.map((c) => c[r]));
+  return { grid, cols: cols.length, enemies, coins, checkpoint, flag, arena };
+}
+
+let lv = null;
+const tile = (c, r) => (c < 0 ? '#' : r < 0 || r >= ROWS || c >= lv.cols ? '.' : lv.grid[r][c]);
+const solid = (c, r) => SOLID.has(tile(c, r));
+
+// 依軸向移動並處理碰撞，回傳是否撞到
+function moveX(o, dx) {
+  o.x += dx;
+  const top = Math.floor(o.y / T), bot = Math.floor((o.y + o.h - 1) / T);
+  const c = dx > 0 ? Math.floor((o.x + o.w - 1) / T) : Math.floor(o.x / T);
+  for (let r = top; r <= bot; r++) {
+    if (solid(c, r)) { o.x = dx > 0 ? c * T - o.w : (c + 1) * T; return true; }
+  }
+  return false;
+}
+function moveY(o, dy) {
+  o.y += dy;
+  const l = Math.floor(o.x / T), rgt = Math.floor((o.x + o.w - 1) / T);
+  const r = dy > 0 ? Math.floor((o.y + o.h - 1) / T) : Math.floor(o.y / T);
+  for (let c = l; c <= rgt; c++) {
+    if (solid(c, r)) { o.y = dy > 0 ? r * T - o.h : (r + 1) * T; return { c, r }; }
+  }
+  return null;
+}
+// 切成小步避免穿牆
+function step(o, dx, dy, onX, onY) {
+  const n = Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / 8) || 1;
+  for (let i = 0; i < n; i++) {
+    if (dx && moveX(o, dx / n)) { onX && onX(); dx = 0; }
+    if (dy) { const hitY = moveY(o, dy / n); if (hitY) { onY && onY(hitY, dy); dy = 0; } }
+  }
+}
+const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+// ---------- 遊戲狀態 ----------
+let state = 'idle'; // idle | calib | play | over
+let levelIdx = 0, lives = MAX_LIVES, coinCount = 0;
+let floorDb = -60, calibrated = false;
+let level = 0, hist = [];
+let p, camX = 0, spawnX = 0, invuln = 0, jumpCd = 0, jumpBoost = 0, jumpV = 0;
+let onset = null, voiced = false, shootCd = 0, fireFlash = 0, fireQueued = 0;
+let pops = [];        // 金幣彈出動畫
+let items = [];       // 火焰花
+let fireballs = [];   // 玩家的火焰
+let shots = [];       // 魔王的火球
+let boss = null;
+let levelTime = 0, runTimes = [];
+let keyFwd = false, keyJump = false, keyFire = false;
+
+const L = () => LEVELS[levelIdx];
+const theme = () => THEMES[L().theme];
+
+function resetPlayer() {
+  p = { x: spawnX, y: (GROUND_ROW - 1) * T - 2, w: 22, h: 30, vx: 0, vy: 0, onGround: false, face: 1, fire: false };
+  invuln = 1.2;
+  onset = null;
+}
+
+function overlay(title, text, btn, onClick) {
+  $('ovTitle').textContent = title;
+  $('ovText').innerHTML = text;
+  $('ovBtn').textContent = btn;
+  $('ovBtn').onclick = onClick;
+  renderPick();
+  $('ov').classList.add('show');
+}
+
+function renderLevels(doneCount = levelIdx) {
+  [...$('levels').children].forEach((el, i) => {
+    el.className = i < doneCount ? 'done' : i === doneCount ? 'on' : '';
+  });
+}
+
+function renderPick() {
+  const best = loadBest();
+  $('pick').innerHTML = LEVELS.map((Lv, i) =>
+    `<button class="secondary" data-i="${i}">第 ${i + 1} 關<small>${Lv.name}</small><small>${best[i] ? '⏱ ' + fmtTime(best[i]) : '—'}</small></button>`).join('');
+}
+
+// ---------- 聲音 ----------
+async function calibrate() {
+  const prev = state;
+  state = 'calib';
+  const samples = [];
+  const t0 = performance.now();
+  await new Promise((res) => {
+    const tick = () => {
+      samples.push(Mic.db());
+      if (performance.now() - t0 < 1000) requestAnimationFrame(tick); else res();
+    };
+    tick();
+  });
+  const median = (arr) => arr.sort((a, b) => a - b)[Math.floor(arr.length / 2)];
+  floorDb = median(samples);
+  calibrated = true;
+  state = prev === 'calib' ? 'play' : prev;
+}
+
+function readVoice() {
+  if (Mic.analyser) {
+    const range = Number($('sens').max) + Number($('sens').min) - Number($('sens').value); // 右邊 = 更靈敏
+    level = Math.max(0, Math.min(1, (Mic.db() - floorDb - 6) / range));
+    // 有聲調（喉嚨發聲，如「啊」）才算跳；「fire / 發射」開頭的 f 沒有聲調，不會誤跳
+    voiced = level > 0.05 && Mic.pitch() > 0;
+  } else {
+    level = 0;
+    voiced = false;
+  }
+  if (keyFwd) level = Math.max(level, 0.35);
+  $('vol').style.width = (level * 100).toFixed(0) + '%';
+  hist.push(level);
+  if (hist.length > 12) hist.shift(); // 約 0.2 秒
+}
+
+// ---------- 語音指令：fire / 發射 ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const FIRE_RE = /\b(fire|fired|fires|firing|fyre)\b|發射|法射|發|射|火/g;
+let rec = null, recOn = false, consumed = [];
+
+function startRec() {
+  if (recOn || !SR) return;
+  rec = new SR();
+  rec.lang = $('lang').value;
+  rec.continuous = true;
+  rec.interimResults = true; // 用暫時結果降低延遲
+  consumed = [];
+  rec.onstart = () => {
+    recOn = true;
+    $('dot').classList.add('on');
+    $('recState').textContent = '語音辨識中（' + $('lang').selectedOptions[0].text + '）';
+  };
+  rec.onresult = (e) => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const text = e.results[i][0].transcript;
+      const n = (text.toLowerCase().match(FIRE_RE) || []).length;
+      // 同一段辨識結果會隨時更新，只算新出現的指令
+      const done = consumed[i] || 0;
+      if (n > done) fireQueued += n - done;
+      consumed[i] = Math.max(done, n);
+      $('heard').textContent = '聽到：' + text;
+    }
+  };
+  rec.onerror = (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      showError($('err'), '麥克風權限被拒絕，無法使用語音發射火焰（可改用鍵盤 F）。');
+    } else if (e.error === 'network') {
+      showError($('err'), '語音辨識需要網路連線，目前無法用語音發射火焰（可改用鍵盤 F）。');
+    }
+  };
+  rec.onend = () => {
+    recOn = false;
+    $('dot').classList.remove('on');
+    $('recState').textContent = '語音辨識未啟動';
+    setTimeout(startRec, 100); // 辨識會自動中斷，持續重啟
+  };
+  rec.start();
+}
+
+// ---------- 關卡流程 ----------
+async function startLevel(i) {
+  $('ov').classList.remove('show');
+  try {
+    await Mic.start();
+  } catch (e) {
+    showError($('err'), '無法使用麥克風：' + e.message + '（仍可用鍵盤遊玩）');
+  }
+  if (SR) startRec();
+  else showError($('err'), '此瀏覽器不支援語音辨識，無法用語音發射火焰，請用 Chrome / Edge（或鍵盤 F）。');
+  if (i === 0) runTimes = [];
+  levelIdx = i; lives = MAX_LIVES; coinCount = 0; levelTime = 0;
+  lv = buildMap(L().map);
+  boss = lv.arena ? makeBoss(lv.arena) : null;
+  spawnX = 2 * T;
+  resetPlayer();
+  pops = []; items = []; fireballs = []; shots = []; hist = [];
+  renderLevels();
+  state = 'idle';
+  if (Mic.analyser && !calibrated) await calibrate();
+  state = 'play';
+}
+
+function makeBoss(arena) {
+  const cfg = BOSSES[arena.type];
+  return {
+    ...cfg, x: (arena.x0 + 17) * T, y: (GROUND_ROW - 2) * T - 8, w: 60, h: 72,
+    vx: -cfg.speed, vy: 0, maxHp: cfg.hp, hurt: 0, atkT: 2, jumpT: cfg.jumpEvery, dead: false, face: -1,
+  };
+}
+
+function lockArena(on) {
+  const a = lv.arena;
+  a.locked = on;
+  for (let r = 0; r < GROUND_ROW; r++) lv.grid[r][a.x0] = on ? 'W' : '.';
+}
+
+function die() {
+  if (state !== 'play') return;
+  sfx('bad');
+  lives--;
+  if (lives <= 0) {
+    state = 'over';
+    overlay('💀 Game Over', `第 ${levelIdx + 1} 關失敗，再試一次吧！`, '重新挑戰', () => startLevel(levelIdx));
+    return;
+  }
+  if (lv.arena && lv.arena.locked && !boss.dead) lockArena(false);
+  shots = [];
+  resetPlayer();
+}
+
+// 被打到：有火焰就只失去火焰
+function hurt() {
+  if (invuln > 0) return;
+  if (p.fire) {
+    p.fire = false;
+    invuln = 1.5;
+    sfx('bad');
+  } else {
+    die();
+  }
+}
+
+function clearLevel() {
+  state = 'over';
+  sfx('win');
+  renderLevels(levelIdx + 1);
+  const best = loadBest();
+  const isRecord = !best[levelIdx] || levelTime < best[levelIdx];
+  if (isRecord) { best[levelIdx] = levelTime; saveBest(best); }
+  runTimes[levelIdx] = levelTime;
+  const timeMsg = `⏱ 用時 ${fmtTime(levelTime)}　${isRecord ? '<b class="good">🏅 新紀錄！</b>' : `最佳 ${fmtTime(best[levelIdx])}`}`;
+  if (levelIdx + 1 >= LEVELS.length) {
+    const full = LEVELS.every((_, i) => runTimes[i] != null);
+    const total = full ? `<br>一路通關總時間：<b>${fmtTime(runTimes.reduce((a, b) => a + b, 0))}</b>` : '';
+    overlay('🏆 全部通關！', `${timeMsg}${total}<br>你打倒了暗黑龍王，是聲控冒險王！`, '從第 1 關重玩', () => startLevel(0));
+  } else {
+    overlay(`🎉 第 ${levelIdx + 1} 關過關！`, `${timeMsg}<br>收集了 ${coinCount} 枚金幣<br>下一關：${LEVELS[levelIdx + 1].name}`,
+      `挑戰第 ${levelIdx + 2} 關`, () => startLevel(levelIdx + 1));
+  }
+}
+
+// ---------- 更新 ----------
+function fireCmd() {
+  if (p.fire) shoot(); else fireFlash = 0.8;
+}
+
+function shoot() {
+  if (!p.fire || shootCd > 0 || fireballs.length >= 3) return;
+  shootCd = 0.2;
+  fireFlash = 0.5;
+  // 語音辨識有延遲，說完後角色常在往回走，所以固定往前射；魔王戰則朝魔王射
+  const dir = boss && lv.arena.locked && !boss.dead ? Math.sign(boss.x + boss.w / 2 - (p.x + p.w / 2)) || 1 : 1;
+  p.face = dir;
+  fireballs.push({ x: p.x + (dir > 0 ? p.w : -12), y: p.y + 10, w: 12, h: 12, vx: 460 * dir, vy: 100, t: 1.6 });
+  playTone(900, 0.12); playTone(500, 0.15, 0.05);
+}
+
+function doJump(lvl) {
+  jumpV = -(420 + lvl * 560);
+  p.vy = jumpV;
+  jumpBoost = 0.15;
+  jumpCd = 0.35;
+}
+
+function update(dt) {
+  if (state === 'calib') return;
+  if (state === 'play' || state === 'idle') readVoice();
+  if (state !== 'play') { fireQueued = 0; return; }
+  levelTime += dt;
+  jumpCd -= dt; shootCd -= dt; fireFlash -= dt;
+  if (invuln > 0) invuln -= dt;
+
+  // 語音或鍵盤的發射指令（一次說好幾個 fire 會連發）
+  if (keyFire) { fireQueued++; keyFire = false; }
+  if (fireQueued > 0 && shootCd <= 0) { fireQueued--; fireCmd(); }
+  fireQueued = Math.min(fireQueued, 3);
+
+  // 水平：有聲音前進（越大聲越快），沒聲音往回走
+  const target = level > MOVE_MIN ? 70 + level * 260 : -55;
+  p.vx += (target - p.vx) * Math.min(1, dt * 6);
+  if (Math.abs(p.vx) > 5) p.face = Math.sign(p.vx);
+
+  if (keyJump && p.onGround && jumpCd <= 0) { doJump(0.55); keyJump = false; }
+
+  // 跳躍：音量突然升高。觀察 60ms，開頭有聲調（如「啊」）才跳
+  const base = Math.min(...hist.slice(0, -3));
+  if (!onset && hist.length >= 6 && jumpCd <= 0 && level - base > JUMP_DIFF && level > JUMP_MIN) {
+    onset = { t: 0.06, base, voiced, peak: level };
+  }
+  if (onset) {
+    onset.t -= dt;
+    onset.peak = Math.max(onset.peak, level);
+    if (onset.t <= 0) {
+      if (onset.voiced && p.onGround && jumpCd <= 0) doJump(onset.peak);
+      onset = null;
+    }
+  }
+  // 起跳後短時間內聲音更大 → 跳更高
+  if (jumpBoost > 0) {
+    jumpBoost -= dt;
+    const v = -(420 + level * 560);
+    if (v < jumpV) { p.vy += v - jumpV; jumpV = v; }
+  }
+
+  p.vy = Math.min(p.vy + GRAVITY * dt, 900);
+  p.onGround = false;
+  step(p, p.vx * dt, p.vy * dt, () => (p.vx = 0), (hitY, dy) => {
+    if (dy > 0) { p.onGround = true; p.vy = 0; return; }
+    p.vy = 0;
+    const ch = tile(hitY.c, hitY.r);
+    if (ch === '?' || ch === 'R') {
+      lv.grid[hitY.r][hitY.c] = 'U';
+      sfx('good');
+      if (ch === '?') {
+        coinCount++;
+        pops.push({ x: hitY.c * T + 16, y: hitY.r * T, t: 0.5 });
+      } else {
+        items.push({ x: hitY.c * T + 4, y: hitY.r * T, w: 24, h: 26, rise: T });
+      }
+    }
+  });
+  p.x = Math.min(p.x, lv.cols * T - p.w);
+
+  if (p.y > H + 40) return die();
+
+  if (lv.checkpoint !== null && p.x > lv.checkpoint * T && spawnX < lv.checkpoint * T) {
+    spawnX = lv.checkpoint * T;
+    sfx('good');
+  }
+  if (p.x >= lv.flag * T && (!boss || boss.dead)) return clearLevel();
+
+  for (const c of lv.coins) {
+    if (!c.got && p.x < c.x + 16 && p.x + p.w > c.x && p.y < c.y + 20 && p.y + p.h > c.y) {
+      c.got = true; coinCount++; sfx('good');
+    }
+  }
+
+  for (const it of items) {
+    if (it.rise > 0) { const d = Math.min(it.rise, 40 * dt); it.y -= d; it.rise -= d; continue; }
+    if (overlap(p, it)) { it.got = true; p.fire = true; sfx('win'); }
+  }
+  items = items.filter((it) => !it.got);
+
+  updateFireballs(dt);
+
+  for (const e of lv.enemies) {
+    if (!e.alive) { e.squash -= dt; continue; }
+    if (Math.abs(e.x - p.x) > W) continue; // 太遠的敵人先不動
+    e.vy = Math.min(e.vy + GRAVITY * dt, 900);
+    step(e, e.vx * dt, e.vy * dt, () => (e.vx = -e.vx), (_, dy) => { if (dy > 0) e.vy = 0; });
+    // 走到邊緣就回頭
+    const frontC = Math.floor((e.vx > 0 ? e.x + e.w + 1 : e.x - 1) / T);
+    const footR = Math.floor((e.y + e.h + 2) / T);
+    if (e.vy === 0 && !solid(frontC, footR)) e.vx = -e.vx;
+    if (e.y > H + 40) e.alive = false;
+
+    if (overlap(p, e)) {
+      if (p.vy > 0 && p.y + p.h - e.y < 16) {
+        e.alive = false; e.squash = 0.4;
+        p.vy = -420;
+        coinCount++;
+        sfx('good');
+      } else {
+        hurt();
+        if (state !== 'play') return;
+      }
+    }
+  }
+
+  if (boss) { updateBoss(dt); if (state !== 'play') return; }
+
+  for (const c of pops) { c.t -= dt; c.y -= 120 * dt; }
+  pops = pops.filter((c) => c.t > 0);
+
+  if (lv.arena && lv.arena.locked) camX = lv.cols * T - W; // 魔王戰鎖定畫面
+  else camX = Math.max(0, Math.min(lv.cols * T - W, p.x - W * 0.35));
+}
+
+function updateFireballs(dt) {
+  for (const f of fireballs) {
+    f.t -= dt;
+    f.vy = Math.min(f.vy + 1500 * dt, 700);
+    step(f, f.vx * dt, f.vy * dt, () => (f.t = 0), (_, dy) => { f.vy = dy > 0 ? -380 : 0; });
+    for (const e of lv.enemies) {
+      if (e.alive && f.t > 0 && overlap(f, e)) { e.alive = false; e.squash = 0.3; f.t = 0; coinCount++; sfx('good'); }
+    }
+    if (boss && !boss.dead && lv.arena.locked && f.t > 0 && overlap(f, boss)) {
+      f.t = 0;
+      damageBoss(1);
+    }
+    if (f.y > H) f.t = 0;
+  }
+  fireballs = fireballs.filter((f) => f.t > 0);
+}
+
+function damageBoss(n) {
+  if (boss.hurt > 0) return;
+  boss.hp -= n;
+  boss.hurt = 0.7;
+  sfx('good');
+  if (boss.hp <= 0) {
+    boss.dead = true;
+    boss.vy = -500;
+    shots = [];
+    sfx('win');
+  }
+}
+
+function updateBoss(dt) {
+  const a = lv.arena;
+  if (!a.locked) {
+    if (boss.dead || p.x < (a.x0 + 2) * T) return;
+    lockArena(true);
+  }
+  if (boss.dead) {
+    // 打倒後掉出畫面
+    boss.vy += GRAVITY * dt;
+    boss.y += boss.vy * dt;
+    return;
+  }
+  boss.hurt -= dt;
+  boss.face = p.x < boss.x ? -1 : 1;
+
+  // 左右走動，碰到房間邊界回頭
+  boss.vy = Math.min(boss.vy + GRAVITY * dt, 900);
+  step(boss, boss.vx * dt, boss.vy * dt, () => (boss.vx = -boss.vx), (_, dy) => { if (dy > 0) boss.vy = 0; });
+  const minX = (a.x0 + 3) * T, maxX = (a.x1 - 2) * T - boss.w;
+  if (boss.x < minX) { boss.x = minX; boss.vx = Math.abs(boss.vx); }
+  if (boss.x > maxX) { boss.x = maxX; boss.vx = -Math.abs(boss.vx); }
+
+  boss.jumpT -= dt;
+  if (boss.jumpT <= 0 && boss.vy === 0) { boss.vy = -650; boss.jumpT = boss.jumpEvery * (0.7 + Math.random() * 0.6); }
+
+  // 丟火球：低空直線（要跳過）與拋物線交替
+  boss.atkT -= dt;
+  if (boss.atkT <= 0) {
+    boss.atkT = boss.every;
+    const cx = boss.x + boss.w / 2, cy = boss.y + 24;
+    const low = Math.random() < 0.5;
+    for (let i = 0; i < boss.spread; i++) {
+      if (low) shots.push({ x: cx, y: (GROUND_ROW - 1) * T + 8, r: 10, vx: boss.face * (220 + i * 70), vy: 0, g: 0 });
+      else shots.push({ x: cx, y: cy, r: 10, vx: boss.face * (150 + i * 90), vy: -520, g: 900 });
+    }
+    playTone(160, 0.25);
+  }
+
+  for (const s of shots) {
+    s.vy += s.g * dt;
+    s.x += s.vx * dt;
+    s.y += s.vy * dt;
+    if (s.y > GROUND_ROW * T - s.r && s.g) { s.y = GROUND_ROW * T - s.r; s.vy = -Math.abs(s.vy) * 0.6; }
+    if (Math.abs(p.x + p.w / 2 - s.x) < p.w / 2 + s.r - 4 && Math.abs(p.y + p.h / 2 - s.y) < p.h / 2 + s.r - 4) {
+      s.dead = true;
+      hurt();
+      if (state !== 'play') return;
+    }
+  }
+  shots = shots.filter((s) => !s.dead && s.x > camX - 40 && s.x < camX + W + 40);
+
+  if (overlap(p, boss)) {
+    if (p.vy > 0 && p.y + p.h - boss.y < 22) {
+      p.vy = -600;
+      damageBoss(2);
+    } else {
+      hurt();
+    }
+  }
+}
+
+// ---------- 繪圖 ----------
+function drawTile(ch, x, y) {
+  const th = theme();
+  if (ch === '#') {
+    g.fillStyle = th.ground[0]; g.fillRect(x, y, T, T);
+    g.fillStyle = th.ground[1]; g.fillRect(x, y + T - 4, T, 4); g.fillRect(x + T - 4, y, 4, T);
+  } else if (ch === 'B' || ch === 'S' || ch === 'W') {
+    g.fillStyle = ch === 'B' ? '#b85c2a' : ch === 'S' ? '#a0522d' : '#555'; g.fillRect(x, y, T, T);
+    g.strokeStyle = ch === 'W' ? '#333' : '#6b3415'; g.lineWidth = 2;
+    g.strokeRect(x + 1, y + 1, T - 2, T - 2);
+    if (ch !== 'S') { g.beginPath(); g.moveTo(x, y + 16); g.lineTo(x + T, y + 16); g.moveTo(x + 16, y); g.lineTo(x + 16, y + 16); g.stroke(); }
+  } else if (ch === '?' || ch === 'U' || ch === 'R') {
+    g.fillStyle = ch === '?' ? '#fab005' : ch === 'R' ? '#f06595' : '#8d6e63'; g.fillRect(x + 1, y + 1, T - 2, T - 2);
+    g.strokeStyle = '#7a4a00'; g.lineWidth = 2; g.strokeRect(x + 1, y + 1, T - 2, T - 2);
+    g.textAlign = 'center';
+    if (ch === '?') { g.fillStyle = '#7a4a00'; g.font = 'bold 22px sans-serif'; g.fillText('?', x + 16, y + 24); }
+    if (ch === 'R') { g.font = '20px sans-serif'; g.fillText('🌸', x + 16, y + 23); }
+  } else if (ch === 'P') {
+    g.fillStyle = '#2f9e44'; g.fillRect(x, y, T, T);
+    g.fillStyle = '#69db7c'; g.fillRect(x + 4, y, 6, T);
+  }
+}
+
+function drawPlayer() {
+  if (invuln > 0 && Math.floor(invuln * 12) % 2) return;
+  const x = p.x - camX, y = p.y;
+  g.save();
+  g.translate(x + p.w / 2, y);
+  g.scale(p.face, 1);
+  const walk = p.onGround && Math.abs(p.vx) > 20 ? Math.sin(performance.now() / 60) * 4 : 0;
+  const cloth = p.fire ? '#fff' : '#e03131', pants = p.fire ? '#e03131' : '#1c3d7a';
+  g.fillStyle = pants; // 褲子與腳
+  g.fillRect(-9, 18, 7, 12 + walk); g.fillRect(2, 18, 7, 12 - walk);
+  g.fillStyle = cloth; // 衣服
+  g.fillRect(-11, 10, 22, 12);
+  g.fillStyle = '#ffd8a8'; // 臉
+  g.fillRect(-8, 0, 16, 11);
+  g.fillStyle = cloth; // 帽子
+  g.fillRect(-10, -4, 20, 6); g.fillRect(4, -1, 9, 3);
+  g.fillStyle = '#222';
+  g.fillRect(3, 3, 3, 3);
+  g.restore();
+}
+
+function drawEnemy(e) {
+  const x = e.x - camX;
+  if (!e.alive) {
+    // 被踩扁
+    if (e.squash > 0 && !drawHead(g, x + e.w / 2, e.y + e.h - 17, 34, 0.3)) {
+      g.fillStyle = '#8b5a2b'; g.fillRect(x, e.y + e.h - 8, e.w, 8);
+    }
+    return;
+  }
+  const wob = Math.sin(performance.now() / 120 + e.x) * 2;
+  g.fillStyle = '#3b2412'; // 腳
+  g.fillRect(x + 1 + wob, e.y + e.h - 7, 10, 7); g.fillRect(x + e.w - 11 - wob, e.y + e.h - 7, 10, 7);
+  if (drawHead(g, x + e.w / 2, e.y + e.h / 2 - 4, 34)) return;
+  g.fillStyle = '#8b5a2b';
+  g.beginPath(); g.ellipse(x + e.w / 2, e.y + 12, e.w / 2 + 2, 13, 0, Math.PI, 0); g.fill();
+  g.fillRect(x + 2, e.y + 11, e.w - 4, 10);
+  g.fillStyle = '#fff';
+  g.fillRect(x + 6, e.y + 8, 5, 7); g.fillRect(x + e.w - 11, e.y + 8, 5, 7);
+  g.fillStyle = '#000';
+  g.fillRect(x + 8, e.y + 10, 3, 4); g.fillRect(x + e.w - 9, e.y + 10, 3, 4);
+}
+
+function drawBoss() {
+  if (boss.hurt > 0 && Math.floor(boss.hurt * 14) % 2) return;
+  const x = boss.x - camX, y = boss.y, w = boss.w, h = boss.h;
+  const dark = boss.type === 2;
+  g.save();
+  g.translate(x + w / 2, y);
+  g.scale(boss.face, 1);
+  // 殼
+  g.fillStyle = dark ? '#5f3dc4' : '#2b8a3e';
+  g.beginPath(); g.ellipse(-8, h * 0.55, w * 0.45, h * 0.38, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#f8f9fa';
+  for (let i = -2; i <= 2; i++) { g.beginPath(); g.moveTo(-8 + i * 10 - 5, h * 0.2); g.lineTo(-8 + i * 10, h * 0.05); g.lineTo(-8 + i * 10 + 5, h * 0.2); g.fill(); }
+  // 腳
+  g.fillStyle = '#e67700';
+  g.fillRect(-14, h - 12, 16, 12); g.fillRect(8, h - 12, 16, 12);
+  // 臉用頭像，頭上加魔王的角
+  if (drawHead(g, 6, h * 0.38, 64)) {
+    g.fillStyle = dark ? '#c92a2a' : '#f08c00';
+    for (const hx of [-12, 24]) {
+      g.beginPath(); g.moveTo(hx - 7, h * 0.38 - 26); g.lineTo(hx, h * 0.38 - 50); g.lineTo(hx + 7, h * 0.38 - 26); g.fill();
+    }
+  } else {
+    g.fillStyle = '#fcc419';
+    g.beginPath(); g.ellipse(8, h * 0.62, w * 0.3, h * 0.32, 0, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(18, h * 0.25, 18, 0, Math.PI * 2); g.fill();
+    g.fillStyle = dark ? '#c92a2a' : '#e8590c'; // 頭髮
+    g.beginPath(); g.moveTo(2, 4); g.lineTo(10, -10); g.lineTo(16, 2); g.lineTo(24, -12); g.lineTo(28, 4); g.fill();
+    g.fillStyle = '#fff'; g.beginPath(); g.arc(24, h * 0.2, 6, 0, Math.PI * 2); g.fill();
+    g.fillStyle = dark ? '#c92a2a' : '#000'; g.beginPath(); g.arc(26, h * 0.2, 3, 0, Math.PI * 2); g.fill();
+  }
+  g.restore();
+}
+
+function drawCoin(x, y) {
+  g.fillStyle = '#fcc419';
+  g.beginPath(); g.ellipse(x + 8, y + 10, 7 * Math.abs(Math.sin(performance.now() / 300)) + 2, 10, 0, 0, Math.PI * 2); g.fill();
+}
+
+function drawFlower(it) {
+  const x = it.x - camX + 12, y = it.y;
+  g.fillStyle = '#2f9e44'; g.fillRect(x - 2, y + 14, 4, 12);
+  const colors = ['#ff6b6b', '#ffa94d', '#ff6b6b', '#ffa94d'];
+  for (let i = 0; i < 4; i++) {
+    g.fillStyle = colors[i];
+    g.beginPath(); g.arc(x + Math.cos(i * Math.PI / 2 + performance.now() / 300) * 6, y + 9 + Math.sin(i * Math.PI / 2 + performance.now() / 300) * 6, 6, 0, 7); g.fill();
+  }
+  g.fillStyle = '#fff3bf'; g.beginPath(); g.arc(x, y + 9, 4, 0, 7); g.fill();
+}
+
+function drawFire(x, y, r, c1, c2) {
+  const grd = g.createRadialGradient(x, y, 1, x, y, r);
+  grd.addColorStop(0, c1); grd.addColorStop(1, c2);
+  g.fillStyle = grd;
+  g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+}
+
+function drawBackground() {
+  const th = theme();
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, th.sky[0]); sky.addColorStop(1, th.sky[1]);
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  if (th.stars) {
+    g.fillStyle = '#fff';
+    for (let i = 0; i < 40; i++) {
+      const sx = ((i * 137 - camX * 0.05) % W + W) % W, sy = (i * 53) % 200;
+      g.fillRect(sx, sy, 2, 2);
+    }
+  }
+  g.fillStyle = th.hill;
+  for (let i = -1; i < 6; i++) {
+    const hx = i * 300 - ((camX * 0.3) % 300);
+    g.beginPath(); g.ellipse(hx + 150, GROUND_ROW * T, 140, 90, 0, Math.PI, 0); g.fill();
+  }
+  if (th.clouds) {
+    g.fillStyle = 'rgba(255,255,255,.85)';
+    for (let i = -1; i < 6; i++) {
+      const cx = i * 260 - ((camX * 0.15) % 260) + 60, cy = 60 + (i % 2) * 40;
+      g.beginPath(); g.arc(cx, cy, 20, 0, 7); g.arc(cx + 24, cy - 8, 24, 0, 7); g.arc(cx + 50, cy, 18, 0, 7); g.fill();
+    }
+  }
+  if (th.lava) {
+    const t = performance.now() / 300;
+    g.fillStyle = '#ff6b00';
+    g.beginPath(); g.moveTo(0, H);
+    for (let x = 0; x <= W; x += 20) g.lineTo(x, H - 28 + Math.sin(t + x / 30) * 4);
+    g.lineTo(W, H); g.fill();
+  }
+}
+
+function draw() {
+  if (!lv) {
+    g.fillStyle = '#5c94fc'; g.fillRect(0, 0, W, H);
+    return;
+  }
+  drawBackground();
+
+  const c0 = Math.floor(camX / T), c1 = Math.min(lv.cols, c0 + Math.ceil(W / T) + 1);
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = c0; c < c1; c++) {
+      const ch = lv.grid[r][c];
+      if (ch !== '.') drawTile(ch, c * T - camX, r * T);
+    }
+  }
+  // 水管頂端
+  for (let c = c0; c < c1; c++) {
+    for (let r = 0; r < ROWS; r++) {
+      if (lv.grid[r][c] === 'P' && tile(c, r - 1) !== 'P') {
+        if (tile(c - 1, r) === 'P') break; // 只畫左半邊那欄
+        g.fillStyle = '#2b8a3e'; g.fillRect(c * T - camX - 4, r * T, T * 2 + 8, 14);
+        g.fillStyle = '#69db7c'; g.fillRect(c * T - camX, r * T + 2, 6, 10);
+        break;
+      }
+    }
+  }
+
+  // 存檔點與終點旗（魔王關要先打倒魔王）
+  if (lv.checkpoint !== null) {
+    const x = lv.checkpoint * T - camX + 16;
+    g.fillStyle = '#ddd'; g.fillRect(x, (GROUND_ROW - 3) * T, 3, 3 * T);
+    g.fillStyle = spawnX >= lv.checkpoint * T ? '#40c057' : '#adb5bd';
+    g.beginPath(); g.moveTo(x + 3, (GROUND_ROW - 3) * T); g.lineTo(x + 26, (GROUND_ROW - 3) * T + 10); g.lineTo(x + 3, (GROUND_ROW - 3) * T + 20); g.fill();
+  }
+  if (!boss || boss.dead) {
+    const fx = lv.flag * T - camX + 14;
+    g.fillStyle = '#e9ecef'; g.fillRect(fx, 2 * T, 4, (GROUND_ROW - 2) * T);
+    g.fillStyle = '#fcc419'; g.beginPath(); g.arc(fx + 2, 2 * T, 7, 0, 7); g.fill();
+    g.fillStyle = '#40c057';
+    g.beginPath(); g.moveTo(fx + 4, 2 * T + 8); g.lineTo(fx + 44, 2 * T + 24); g.lineTo(fx + 4, 2 * T + 40); g.fill();
+  }
+
+  for (const c of lv.coins) if (!c.got) drawCoin(c.x - camX, c.y);
+  for (const c of pops) drawCoin(c.x - camX - 8, c.y - 20);
+  for (const it of items) drawFlower(it);
+  for (const e of lv.enemies) drawEnemy(e);
+  if (boss) drawBoss();
+  for (const s of shots) drawFire(s.x - camX, s.y, s.r, '#fff3bf', boss && boss.type === 2 ? '#7048e8' : '#f03e3e');
+  drawPlayer();
+  for (const f of fireballs) drawFire(f.x - camX + 6, f.y + 6, 8, '#fff3bf', '#ff922b');
+
+  // HUD
+  g.fillStyle = 'rgba(0,0,0,.35)';
+  g.beginPath(); g.roundRect(10, 10, 420, 40, 10); g.fill();
+  g.fillStyle = '#fff'; g.font = 'bold 18px sans-serif'; g.textAlign = 'left';
+  g.fillText(`第 ${levelIdx + 1} 關　${'❤️'.repeat(Math.max(0, lives))}　🪙 ${coinCount}　⏱ ${fmtTime(levelTime)}${p.fire ? '　🔥' : ''}`, 22, 37);
+  const prog = Math.min(1, p.x / (lv.flag * T));
+  g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(W - 210, 22, 190, 12);
+  g.fillStyle = '#fcc419'; g.fillRect(W - 210, 22, 190 * prog, 12);
+  g.fillText('🚩', W - 22, 36);
+
+  if (boss && lv.arena.locked && !boss.dead) {
+    g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(W / 2 - 160, 60, 320, 34);
+    g.fillStyle = '#fff'; g.font = 'bold 14px sans-serif'; g.textAlign = 'center';
+    g.fillText(`👹 ${boss.name}`, W / 2, 75);
+    g.fillStyle = '#495057'; g.fillRect(W / 2 - 150, 80, 300, 8);
+    g.fillStyle = '#fa5252'; g.fillRect(W / 2 - 150, 80, 300 * Math.max(0, boss.hp) / boss.maxHp, 8);
+  }
+
+  if (fireFlash > 0) {
+    g.globalAlpha = Math.min(1, fireFlash / 0.2);
+    g.fillStyle = p.fire ? '#ff922b' : '#adb5bd'; g.font = 'bold 22px sans-serif'; g.textAlign = 'center';
+    g.fillText(p.fire ? '🔥 發射！' : '發射！（需要先吃火焰花 🌸）', p.x - camX + p.w / 2, p.y - 18);
+    g.globalAlpha = 1;
+  }
+
+  if (state === 'calib') {
+    g.fillStyle = 'rgba(0,0,0,.5)'; g.fillRect(0, H / 2 - 36, W, 60);
+    g.fillStyle = '#fff'; g.font = 'bold 24px sans-serif'; g.textAlign = 'center';
+    g.fillText('偵測環境噪音中，請保持安靜…', W / 2, H / 2);
+  }
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ---------- 介面 ----------
+addEventListener('keydown', (e) => {
+  if (state !== 'play') return;
+  if (e.key === 'ArrowRight') { keyFwd = true; e.preventDefault(); }
+  if (e.key === ' ' || e.key === 'ArrowUp') { keyJump = true; e.preventDefault(); }
+  if (e.key === 'f' || e.key === 'F') keyFire = true;
+});
+addEventListener('keyup', (e) => {
+  if (e.key === 'ArrowRight') keyFwd = false;
+});
+function updateMarks() {
+  $('mkMove').style.left = MOVE_MIN * 100 + '%';
+  $('mkJump').style.left = JUMP_MIN * 100 + '%';
+}
+$('lang').onchange = () => { if (rec && recOn) rec.abort(); }; // onend 會用新語言重啟
+$('levels').innerHTML = LEVELS.map((Lv, i) => `<span title="${Lv.name}">${i + 1}</span>`).join('');
+$('pick').onclick = (e) => { const b = e.target.closest('button'); if (b) startLevel(Number(b.dataset.i)); };
+$('levels').onclick = (e) => {
+  const i = [...$('levels').children].indexOf(e.target);
+  if (i >= 0 && state !== 'calib') startLevel(i);
+};
+$('ovBtn').onclick = () => startLevel(0);
+$('recal').onclick = () => { if (Mic.analyser && state !== 'calib') calibrate(); };
+updateMarks();
+renderPick();
+renderLevels();
+</script>
+</body>
+</html>

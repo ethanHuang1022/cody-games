@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>動感遊戲廳</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1226;
+      --card: #18203d;
+      --card-hover: #212b52;
+      --text: #f4f6ff;
+      --muted: #a8b0d0;
+      --accent: #ff7b54;
+      --hand: #59c8ff;
+      --body: #5be37d;
+      --face: #ffd447;
+      --free: #c9a8ff;
+      --duo: #ff7bd5;
+    }
+
+    body {
+      min-height: 100vh;
+      background: radial-gradient(1200px 600px at 20% -10%, #2a3a7a 0%, transparent 60%), var(--bg);
+      color: var(--text);
+      font-family: system-ui, "Noto Sans TC", sans-serif;
+      line-height: 1.6;
+    }
+
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 48px 16px 64px; }
+
+    header { text-align: center; margin-bottom: 40px; }
+    header h1 { font-size: clamp(36px, 7vw, 60px); letter-spacing: 6px; }
+    header h1 span { color: var(--accent); }
+    header p { color: var(--muted); font-size: 18px; margin-top: 8px; }
+
+    .tips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    .tips span {
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    section { margin-top: 40px; }
+    section h2 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 22px;
+      margin-bottom: 14px;
+    }
+    section h2 .dot { width: 12px; height: 12px; border-radius: 50%; }
+    section h2 small { color: var(--muted); font-weight: normal; font-size: 15px; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 20px;
+      border-radius: 16px;
+      background: var(--card);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      color: inherit;
+      text-decoration: none;
+      transition: transform 0.15s, background 0.15s;
+    }
+    .card:hover, .card:focus-visible { transform: translateY(-3px); background: var(--card-hover); outline: none; }
+    .card .icon { font-size: 44px; line-height: 1.1; }
+    .card h3 { font-size: 20px; }
+    .card p { color: var(--muted); font-size: 15px; flex: 1; }
+    .card .meta { display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-top: 6px; }
+    .card .need { color: var(--muted); }
+    .card .best { color: var(--face); font-weight: bold; }
+
+    footer { margin-top: 56px; text-align: center; color: var(--muted); font-size: 14px; }
+    footer code { background: rgba(255, 255, 255, 0.08); padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>動感<span>遊戲廳</span></h1>
+      <p>不用手把，只要一顆鏡頭：用手、身體和表情來玩</p>
+      <div class="tips">
+        <span>📷 第一次進遊戲要允許使用鏡頭</span>
+        <span>🔊 點一下畫面才會有聲音</span>
+        <span>🔒 影像只在你的電腦上處理，不會上傳</span>
+      </div>
+    </header>
+
+    <main id="sections"></main>
+
+    <footer>
+      <p>所有遊戲都在瀏覽器裡執行，第一次開啟需要網路下載 AI 模型。</p>
+      <p>開發者：網址後面加上 <code>?debug</code> 可以不用鏡頭測試。</p>
+    </footer>
+  </div>
+
+  <script>
+    // 遊戲清單：best 是最高分在 localStorage 的鍵，unit 是分數單位
+    const GROUPS = [
+      {
+        title: "手部追蹤",
+        sub: "把手舉到鏡頭前",
+        color: "var(--hand)",
+        games: [
+          { dir: "slice", icon: "💎", name: "水晶劍士", desc: "食指當劍，揮砍指定顏色的水晶，切錯顏色會扣血。", need: "一隻手" },
+          { dir: "puzzle", icon: "🧩", name: "捏捏拼圖", desc: "拍下自己的照片切成拼圖，用拇指和食指捏起來拼回去。", need: "一隻手", unit: "秒", lower: true },
+          { dir: "spell", icon: "🪄", name: "手勢咒語", desc: "比出幽靈身上的手勢咒語，施法把它們消滅。", need: "一隻手" },
+          { dir: "trace", icon: "✏️", name: "空中描圖", desc: "伸出食指在空中描出愛心、星星、閃電，看誰描得最準。", need: "一隻手" },
+        ],
+      },
+      {
+        title: "全身動作",
+        sub: "離鏡頭 2～3 公尺，讓身體入鏡",
+        color: "var(--body)",
+        games: [
+          { dir: "body", icon: "🏋️", name: "健身勇者", desc: "深蹲、開合跳、出拳、抬膝，做出怪物要求的動作來攻擊。", need: "全身", best: "body-hero-best" },
+          { dir: "runner", icon: "🏃", name: "原地跑酷", desc: "左右移動換跑道、跳起來跨欄、蹲下鑽桿，越跑越快。", need: "全身" },
+          { dir: "wall", icon: "🧱", name: "人形牆", desc: "牆上有人形洞朝你壓過來，擺出一樣的姿勢穿過去！", need: "上半身" },
+          { dir: "dance", icon: "💃", name: "節奏舞步", desc: "跟著節拍，在姿勢卡碰到判定線時擺出動作。", need: "上半身" },
+          { dir: "pet", icon: "🐣", name: "肩上寵物", desc: "小麻糬坐在你肩上，摸摸牠、餵牠吃東西，看牠長大。", need: "上半身" },
+        ],
+      },
+      {
+        title: "臉部表情",
+        sub: "臉對著鏡頭就好",
+        color: "var(--face)",
+        games: [
+          { dir: "face", icon: "🐦", name: "表情飛行", desc: "張嘴往上飛、微笑開護盾、歪頭前後移動，閃避雷雲。", need: "臉", best: "face-flight-best" },
+          { dir: "blink", icon: "🎯", name: "眨眼射手", desc: "轉頭瞄準、眨眼射擊、挑眉放炸彈的打靶遊戲。", need: "臉" },
+          { dir: "mimic", icon: "🎭", name: "表情模仿", desc: "模仿驚訝、嘟嘴、鼓腮等表情，最後看自己的搞笑照片。", need: "臉" },
+        ],
+      },
+      {
+        title: "創意與多人",
+        sub: "不同的玩法",
+        color: "var(--duo)",
+        games: [
+          { dir: "bubble", icon: "🫧", name: "泡泡拍拍", desc: "在泡泡的位置揮手就能拍破，不需要 AI，任何電腦都能玩。", need: "免 AI" },
+          { dir: "shadow", icon: "👤", name: "影子彈珠", desc: "你的影子是實體，用身體把球頂上去撞星星。", need: "全身影子" },
+          { dir: "duel", icon: "🪢", name: "雙人拔河", desc: "兩個人並排，雙手舉高再拉下，把旗子拉到自己這邊。", need: "兩個人" },
+        ],
+      },
+    ];
+
+    function readBest(g) {
+      try {
+        const key = g.best || `best-${g.dir}`;
+        return Number(localStorage.getItem(key)) || 0;
+      } catch {
+        return 0;
+      }
+    }
+
+    const main = document.getElementById("sections");
+    for (const group of GROUPS) {
+      const sec = document.createElement("section");
+      sec.innerHTML = `<h2><span class="dot" style="background:${group.color}"></span>${group.title}<small>${group.sub}</small></h2>`;
+      const grid = document.createElement("div");
+      grid.className = "grid";
+      for (const g of group.games) {
+        const best = readBest(g);
+        const bestText = best ? `最佳 ${g.lower ? best.toFixed(1) : best}${g.unit || " 分"}` : "";
+        const a = document.createElement("a");
+        a.className = "card";
+        a.href = `${g.dir}/`;
+        a.innerHTML =
+          `<div class="icon">${g.icon}</div>` +
+          `<h3>${g.name}</h3>` +
+          `<p>${g.desc}</p>` +
+          `<div class="meta"><span class="need">需要：${g.need}</span><span class="best">${bestText}</span></div>`;
+        grid.appendChild(a);
+      }
+      sec.appendChild(grid);
+      main.appendChild(sec);
+    }
+  </script>
+</body>
+</html>

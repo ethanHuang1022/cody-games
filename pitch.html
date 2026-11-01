@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>音準挑戰</title>
+<link rel="stylesheet" href="style.css?v=20261101171856">
+<style>
+  .notes { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 8px 0 12px; }
+  .notes span {
+    min-width: 64px; padding: 8px 10px; border-radius: 12px; background: var(--panel2);
+    text-align: center; font-weight: 700; color: var(--muted);
+  }
+  .notes span small { display: block; font-weight: 400; font-size: .75rem; }
+  .notes span.cur { background: var(--accent); color: #222; transform: scale(1.1); }
+  .notes span.ok { background: var(--good); color: #123; }
+  .info { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center; margin-bottom: 12px; }
+  .info div { background: var(--panel2); border-radius: 12px; padding: 10px; }
+  .info b { display: block; font-size: 1.6rem; }
+  .hold { height: 18px; background: #0d1020; border-radius: 9px; overflow: hidden; margin-top: 12px; }
+  .hold > div { height: 100%; width: 0; background: var(--good); }
+  .hearts { font-size: 1.4rem; letter-spacing: 3px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="index.html">← 回首頁</a>
+    <h1>🎵 音準挑戰</h1>
+    <div class="levels" id="levels"><span>第1關</span><span>第2關</span><span>第3關</span></div>
+  </header>
+  <div class="err" id="err"></div>
+  <div class="panel">
+    <div class="row" style="justify-content:space-between">
+      <div class="hearts" id="hearts"></div>
+      <div class="muted" id="levelName"></div>
+    </div>
+    <div class="notes" id="notes"></div>
+    <div class="info">
+      <div><span class="muted">目標音</span><b id="tgt">-</b></div>
+      <div><span class="muted">你的音</span><b id="you">-</b></div>
+      <div><span class="muted">偏差</span><b id="diff">-</b></div>
+    </div>
+    <canvas id="cv" width="800" height="300"></canvas>
+    <div class="hold"><div id="hold"></div></div>
+    <div class="row" style="justify-content:center;margin-top:14px">
+      <button class="secondary" id="replayBtn" disabled>🔊 再聽一次目標音</button>
+    </div>
+  </div>
+  <p class="muted">玩法：聽系統播放的音，用「啊～」或「嗚～」唱出同一個音。綠色區域代表音準正確，在綠色區域內穩住直到下方進度條滿就過關。
+    不用唱同一個八度，低八度或高八度都算對。每關 3 顆愛心，一個音 12 秒內沒唱到會扣 1 顆。</p>
+</div>
+
+<div class="overlay show" id="ov">
+  <div class="card">
+    <h2 id="ovTitle">音準挑戰</h2>
+    <p id="ovText" class="muted">第 1 關：單音<br>第 2 關：兩個音的音程<br>第 3 關：小星星旋律<br><br>建議戴耳機或在安靜環境遊玩。</p>
+    <button id="ovBtn">開始遊戲</button>
+  </div>
+</div>
+
+<script src="common.js?v=20261101171856"></script>
+<script>
+const LEVELS = [
+  { name: '單音', tol: 50, hold: 1.0, tasks: [['C4'], ['E4'], ['G4'], ['D4'], ['A4']] },
+  { name: '音程', tol: 40, hold: 0.8, tasks: [['C4', 'G4'], ['E4', 'C4'], ['D4', 'A4'], ['G4', 'E4'], ['C4', 'C5']] },
+  { name: '小星星', tol: 35, hold: 0.6, tasks: [['C4', 'C4', 'G4', 'G4'], ['A4', 'A4', 'G4'], ['F4', 'F4', 'E4', 'E4'], ['D4', 'D4', 'C4']] },
+];
+const MAX_HEARTS = 3, NOTE_TIMEOUT = 12, RANGE = 300; // 圖表上下各 300 音分
+const $ = (id) => document.getElementById(id);
+const cv = $('cv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+
+let state = 'idle'; // idle | demo | sing | pause | over
+let levelIdx = 0, taskIdx = 0, noteIdx = 0, hearts = MAX_HEARTS;
+let holdT = 0, noteT = 0, demoUntil = 0;
+let recent = [];          // 平滑用
+let history = [];         // {t, cents}
+let devSum = 0, devN = 0; // 計算星等
+let cents = null;
+
+const L = () => LEVELS[levelIdx];
+const task = () => L().tasks[taskIdx];
+const targetMidi = () => Note.parse(task()[noteIdx]);
+
+function overlay(title, text, btn, onClick) {
+  $('ovTitle').textContent = title;
+  $('ovText').innerHTML = text;
+  $('ovBtn').textContent = btn;
+  $('ovBtn').onclick = onClick;
+  $('ov').classList.add('show');
+}
+
+function render() {
+  $('hearts').textContent = '❤️'.repeat(hearts) + '🤍'.repeat(MAX_HEARTS - hearts);
+  $('levelName').textContent = `第 ${levelIdx + 1} 關：${L().name}　第 ${taskIdx + 1} / ${L().tasks.length} 題`;
+  $('notes').innerHTML = task().map((n, i) =>
+    `<span class="${i < noteIdx ? 'ok' : i === noteIdx ? 'cur' : ''}">${Note.solfege(n)}<small>${n}</small></span>`).join('');
+  const n = task()[noteIdx];
+  $('tgt').textContent = n ? `${Note.solfege(n)} ${n}` : '-';
+  [...$('levels').children].forEach((el, i) => {
+    el.className = i < levelIdx ? 'done' : i === levelIdx ? 'on' : '';
+  });
+}
+
+// 播放整題，播完開始唱
+function playTask() {
+  state = 'demo';
+  $('replayBtn').disabled = true;
+  const notes = task().slice(noteIdx);
+  notes.forEach((n, i) => playTone(Note.midiToFreq(Note.parse(n)), 0.7, i * 0.75));
+  demoUntil = performance.now() + notes.length * 750 + 350;
+}
+
+function replayCurrent() {
+  state = 'demo';
+  playTone(Note.midiToFreq(targetMidi()), 1.0);
+  demoUntil = performance.now() + 1150;
+}
+
+function beginNote() {
+  holdT = 0; noteT = 0; recent = [];
+  render();
+}
+
+async function startLevel(i) {
+  $('ov').classList.remove('show');
+  try {
+    await Mic.start();
+  } catch (e) {
+    showError($('err'), '無法使用麥克風：' + e.message);
+    return;
+  }
+  levelIdx = i; taskIdx = 0; noteIdx = 0; hearts = MAX_HEARTS; devSum = 0; devN = 0;
+  beginNote();
+  playTask();
+}
+
+function noteDone() {
+  sfx('good');
+  noteIdx++;
+  if (noteIdx < task().length) {
+    state = 'pause';
+    demoUntil = performance.now() + 500;
+    beginNote();
+    return;
+  }
+  taskIdx++; noteIdx = 0;
+  if (taskIdx < L().tasks.length) {
+    state = 'pause';
+    demoUntil = Infinity; // 等待播放下一題
+    setTimeout(() => { beginNote(); playTask(); }, 700);
+    return;
+  }
+  levelDone();
+}
+
+function levelDone() {
+  state = 'over';
+  sfx('win');
+  const avg = devN ? devSum / devN : 0;
+  const stars = avg < 15 ? 3 : avg < 25 ? 2 : 1;
+  const msg = `平均偏差 ${avg.toFixed(0)} 音分　${'⭐'.repeat(stars)}${'☆'.repeat(3 - stars)}`;
+  if (levelIdx + 1 >= LEVELS.length) {
+    levelIdx++;
+    [...$('levels').children].forEach((el) => (el.className = 'done'));
+    overlay('🏆 全部通關！', `${msg}<br>你的音感超準！`, '從第 1 關重玩', () => startLevel(0));
+  } else {
+    overlay(`🎉 第 ${levelIdx + 1} 關過關！`, `${msg}<br>下一關：${LEVELS[levelIdx + 1].name}`, `挑戰第 ${levelIdx + 2} 關`, () => startLevel(levelIdx + 1));
+  }
+}
+
+function timeout() {
+  sfx('bad');
+  hearts--;
+  if (hearts <= 0) {
+    state = 'over';
+    render();
+    overlay('💔 愛心用完了', `第 ${levelIdx + 1} 關失敗，再試一次吧！`, '重新挑戰', () => startLevel(levelIdx));
+    return;
+  }
+  beginNote();
+  playTask(); // 從目前這個音重新播放
+}
+
+function update(dt) {
+  if (!Mic.ctx || state === 'idle' || state === 'over') return;
+  const now = performance.now();
+  if ((state === 'demo' || state === 'pause') && now >= demoUntil) {
+    state = 'sing';
+    $('replayBtn').disabled = false;
+  }
+  // 播放目標音時不偵測，避免收到喇叭聲音
+  if (state !== 'sing') { cents = null; return; }
+
+  const f = Mic.pitch();
+  if (f > 0) {
+    recent.push(Note.freqToMidi(f));
+    if (recent.length > 5) recent.shift();
+  } else {
+    recent = [];
+  }
+  if (recent.length >= 3) {
+    const m = [...recent].sort((a, b) => a - b)[Math.floor(recent.length / 2)];
+    let d = m - targetMidi();
+    d = ((d + 6) % 12 + 12) % 12 - 6; // 折疊到最近的八度
+    cents = d * 100;
+    $('you').textContent = `${Note.solfege(Note.name(m))} ${Note.name(m)}`;
+    $('diff').textContent = (cents > 0 ? '+' : '') + cents.toFixed(0);
+    $('diff').className = Math.abs(cents) <= L().tol ? 'good' : 'bad';
+  } else {
+    cents = null;
+    $('you').textContent = '-';
+    $('diff').textContent = '-';
+    $('diff').className = '';
+  }
+  history.push({ t: now, c: cents });
+
+  noteT += dt;
+  if (cents !== null && Math.abs(cents) <= L().tol) {
+    holdT += dt;
+    devSum += Math.abs(cents); devN++;
+  } else {
+    holdT = Math.max(0, holdT - dt * 0.6);
+  }
+  $('hold').style.width = Math.min(100, (holdT / L().hold) * 100) + '%';
+  if (holdT >= L().hold) noteDone();
+  else if (noteT >= NOTE_TIMEOUT) timeout();
+}
+
+function yOf(c) { return H / 2 - (c / RANGE) * (H / 2 - 10); }
+
+function draw() {
+  const now = performance.now();
+  g.fillStyle = '#0d1020'; g.fillRect(0, 0, W, H);
+  const tol = LEVELS[Math.min(levelIdx, 2)].tol;
+
+  // 半音格線
+  g.strokeStyle = '#1c2240'; g.lineWidth = 1;
+  for (let c = -RANGE; c <= RANGE; c += 100) {
+    g.beginPath(); g.moveTo(0, yOf(c)); g.lineTo(W, yOf(c)); g.stroke();
+  }
+  // 正確區域
+  g.fillStyle = 'rgba(74, 222, 128, .18)';
+  g.fillRect(0, yOf(tol), W, yOf(-tol) - yOf(tol));
+  g.strokeStyle = '#4ade80'; g.setLineDash([6, 6]);
+  g.beginPath(); g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
+  g.setLineDash([]);
+
+  g.fillStyle = '#9aa3c7'; g.font = '14px sans-serif'; g.textAlign = 'left';
+  g.fillText('偏高 ▲', 10, 20);
+  g.fillText('偏低 ▼', 10, H - 10);
+
+  // 歷史軌跡（最近 4 秒）
+  const span = 4000, headX = W - 60;
+  history = history.filter((p) => now - p.t < span);
+  g.lineWidth = 4; g.lineCap = 'round';
+  let prev = null;
+  for (const p of history) {
+    if (p.c === null) { prev = null; continue; }
+    const x = headX - ((now - p.t) / span) * headX;
+    const y = yOf(Math.max(-RANGE, Math.min(RANGE, p.c)));
+    if (prev) {
+      g.strokeStyle = Math.abs(p.c) <= tol ? '#4ade80' : '#f87171';
+      g.beginPath(); g.moveTo(prev[0], prev[1]); g.lineTo(x, y); g.stroke();
+    }
+    prev = [x, y];
+  }
+
+  if (cents !== null) {
+    const y = yOf(Math.max(-RANGE, Math.min(RANGE, cents)));
+    const ok = Math.abs(cents) <= tol;
+    // 頭像外圈：綠色 = 音準正確，黃色 = 還沒到
+    g.strokeStyle = ok ? '#4ade80' : '#ffcf4a';
+    g.lineWidth = 4;
+    g.beginPath(); g.arc(headX, y, 26, 0, Math.PI * 2); g.stroke();
+    if (!drawHead(g, headX, y, 46)) {
+      g.fillStyle = ok ? '#4ade80' : '#ffcf4a';
+      g.beginPath(); g.arc(headX, y, 12, 0, Math.PI * 2); g.fill();
+    }
+    g.textAlign = 'center'; g.font = 'bold 20px sans-serif';
+    g.fillStyle = '#eef1ff';
+    const hint = ok ? '很準！穩住～' : cents > 0 ? '太高了，往下一點 ↓' : '太低了，往上一點 ↑';
+    g.fillText(hint, W / 2, 34);
+  } else {
+    g.textAlign = 'center'; g.font = 'bold 20px sans-serif'; g.fillStyle = '#9aa3c7';
+    const msg = { demo: '🔊 仔細聽目標音…', pause: '下一個音…', sing: '🎤 唱出目標音！' }[state] || '';
+    g.fillText(msg, W / 2, 34);
+  }
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+$('ovBtn').onclick = () => startLevel(0);
+$('replayBtn').onclick = () => { $('replayBtn').disabled = true; replayCurrent(); };
+render();
+</script>
+</body>
+</html>

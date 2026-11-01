@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>英文發音闖關</title>
+<link rel="stylesheet" href="style.css?v=20261101171856">
+<style>
+  .stage { text-align: center; padding: 16px; }
+  .wordline { display: flex; align-items: baseline; justify-content: center; gap: 14px; margin: 6px 0 10px; flex-wrap: wrap; }
+  .emoji { font-size: 2.6rem; line-height: 1; }
+  .word { font-size: 2.6rem; font-weight: 800; letter-spacing: 2px; }
+  .word.sentence { font-size: 1.7rem; letter-spacing: 0; }
+  .zh { color: var(--muted); font-size: 1.2rem; }
+  .status { min-height: 1.6em; font-size: 1.2rem; margin: 12px 0 4px; }
+  .heard { min-height: 1.6em; color: var(--muted); }
+  .hearts { font-size: 1.6rem; letter-spacing: 4px; }
+  .dots { display: flex; gap: 6px; justify-content: center; margin-top: 10px; }
+  .dots i { width: 12px; height: 12px; border-radius: 50%; background: var(--panel2); display: block; }
+  .dots i.ok { background: var(--good); }
+  .dots i.cur { background: var(--accent); }
+  #micBtn.listening { background: var(--bad); color: #fff; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { transform: scale(1.07); } }
+  .shake { animation: shake .4s; }
+  @keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+  .pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-top: 18px; }
+  .pick button { padding: 10px 8px; font-size: .9rem; }
+  .pick button small { display: block; font-weight: 400; opacity: .8; }
+  #levels span { cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="index.html">← 回首頁</a>
+    <h1>🗣️ 英文發音闖關</h1>
+    <div class="levels" id="levels"></div>
+  </header>
+  <div class="err" id="err"></div>
+  <div class="panel stage" id="stage">
+    <div class="row" style="justify-content:space-between">
+      <div class="hearts" id="hearts"></div>
+      <div class="muted" id="levelName"></div>
+    </div>
+    <div class="wordline">
+      <span class="emoji" id="emoji">🎧</span>
+      <span class="word" id="word">Ready?</span>
+      <span class="zh" id="zh"></span>
+    </div>
+    <canvas id="cv" width="800" height="420"></canvas>
+    <div class="status" id="status">按下開始，系統會先念出單字</div>
+    <div class="heard" id="heard"></div>
+    <div class="row" style="justify-content:center;margin-top:12px">
+      <button class="secondary" id="speakBtn" disabled>🔊 再聽一次</button>
+      <button id="micBtn" disabled>🎤 換我念</button>
+      <button class="secondary" id="slowBtn" disabled>🐢 慢速播放</button>
+    </div>
+    <div class="dots" id="dots"></div>
+  </div>
+  <p class="muted">玩法：系統播放單字 → 自動開始收音 → 一開口頭像就往上飛！念對了，上方的門會打開，就能穿過洞口爬上一層樓；念錯了會撞到門掉下來，扣 1 顆愛心。每關 3 顆愛心，爬到頂樓的 🏁 就過關。<br>
+    ※ 語音辨識需使用 Chrome / Edge 並連上網路。</p>
+</div>
+
+<div class="overlay show" id="ov">
+  <div class="card">
+    <h2 id="ovTitle">英文發音闖關</h2>
+    <p id="ovText" class="muted">聽系統念出英文單字，再念出一樣的單字。<br>念對就能穿過洞口往上爬，共 6 關！<br>每次從題庫隨機抽題，還會隨機出現句子 💬<br>第 6 關是地獄級：超難單字＋繞口令！</p>
+    <button id="ovBtn">開始遊戲</button>
+    <div class="muted" style="margin-top:18px">或直接選關：</div>
+    <div class="pick" id="pick"></div>
+  </div>
+</div>
+
+<script src="common.js?v=20261101171856"></script>
+<script>
+// 每關有單字題庫與句子題庫，每次遊玩隨機抽題，句子會隨機穿插出現
+// 單字：[英文, 中文, emoji]　句子：[英文, 中文]
+const LEVELS = [
+  { name: '動物', perRound: 6, sentences: 1, words: [
+    ['cat', '貓', '🐱'], ['dog', '狗', '🐶'], ['fish', '魚', '🐟'], ['bird', '鳥', '🐦'], ['duck', '鴨子', '🦆'],
+    ['lion', '獅子', '🦁'], ['tiger', '老虎', '🐯'], ['monkey', '猴子', '🐵'], ['rabbit', '兔子', '🐰'], ['horse', '馬', '🐴'],
+    ['sheep', '綿羊', '🐑'], ['frog', '青蛙', '🐸'], ['snake', '蛇', '🐍'], ['turtle', '烏龜', '🐢'], ['zebra', '斑馬', '🦓'],
+    ['panda', '熊貓', '🐼'], ['chicken', '雞', '🐔'], ['mouse', '老鼠', '🐭'], ['cow', '牛', '🐮'], ['pig', '豬', '🐷'],
+  ], sentencePool: [
+    ['I have a dog', '我有一隻狗'], ['The cat is sleeping', '貓在睡覺'], ['I see a bird', '我看到一隻鳥'],
+    ['The fish can swim', '魚會游泳'], ['Look at the monkey', '看那隻猴子'], ['The rabbit is white', '兔子是白色的'],
+  ]},
+  { name: '水果與食物', perRound: 7, sentences: 1, words: [
+    ['apple', '蘋果', '🍎'], ['banana', '香蕉', '🍌'], ['orange', '柳橙', '🍊'], ['grape', '葡萄', '🍇'], ['lemon', '檸檬', '🍋'],
+    ['peach', '桃子', '🍑'], ['mango', '芒果', '🥭'], ['cherry', '櫻桃', '🍒'], ['watermelon', '西瓜', '🍉'], ['pineapple', '鳳梨', '🍍'],
+    ['bread', '麵包', '🍞'], ['cheese', '起司', '🧀'], ['pizza', '披薩', '🍕'], ['cookie', '餅乾', '🍪'], ['carrot', '紅蘿蔔', '🥕'],
+    ['potato', '馬鈴薯', '🥔'], ['tomato', '番茄', '🍅'], ['noodles', '麵條', '🍜'], ['sandwich', '三明治', '🥪'], ['milk', '牛奶', '🥛'],
+  ], sentencePool: [
+    ['I want an apple', '我想要一顆蘋果'], ['Bananas are yellow', '香蕉是黃色的'], ['I like pizza very much', '我非常喜歡披薩'],
+    ['Can I have some milk', '我可以喝點牛奶嗎'], ['This cake is delicious', '這個蛋糕很好吃'], ['I eat bread every morning', '我每天早上吃麵包'],
+  ]},
+  { name: '生活長單字', perRound: 7, sentences: 2, words: [
+    ['elephant', '大象', '🐘'], ['butterfly', '蝴蝶', '🦋'], ['computer', '電腦', '💻'], ['chocolate', '巧克力', '🍫'], ['umbrella', '雨傘', '☂️'],
+    ['beautiful', '美麗的', '🌸'], ['strawberry', '草莓', '🍓'], ['dinosaur', '恐龍', '🦕'], ['birthday', '生日', '🎂'], ['hamburger', '漢堡', '🍔'],
+    ['telephone', '電話', '☎️'], ['basketball', '籃球', '🏀'], ['holiday', '假期', '🏖️'], ['adventure', '冒險', '🗺️'], ['important', '重要的', '❗'],
+    ['wonderful', '很棒的', '🌟'], ['kangaroo', '袋鼠', '🦘'], ['crocodile', '鱷魚', '🐊'], ['octopus', '章魚', '🐙'], ['together', '一起', '🤝'],
+  ], sentencePool: [
+    ['Happy birthday to you', '祝你生日快樂'], ['The dinosaur is very big', '恐龍非常大'], ['We play basketball after school', '我們放學後打籃球'],
+    ['Today is a wonderful day', '今天是很棒的一天'], ['Open your umbrella', '打開你的雨傘'], ['Let us go on an adventure', '我們去冒險吧'],
+  ]},
+  { name: '難發音（th / r / l / v）', perRound: 8, sentences: 2, words: [
+    ['three', '三', '3️⃣'], ['weather', '天氣', '🌦️'], ['world', '世界', '🌍'], ['girl', '女孩', '👧'], ['library', '圖書館', '📚'],
+    ['vegetable', '蔬菜', '🥦'], ['thirsty', '口渴的', '🥤'], ['volcano', '火山', '🌋'], ['thousand', '一千', '🔢'], ['brother', '兄弟', '👦'],
+    ['mother', '媽媽', '👩'], ['father', '爸爸', '👨'], ['river', '河流', '🏞️'], ['rainbow', '彩虹', '🌈'], ['really', '真的', '😮'],
+    ['travel', '旅行', '✈️'], ['clothes', '衣服', '👕'], ['video', '影片', '📹'], ['thunder', '雷', '⛈️'], ['curly', '捲捲的', '➰'],
+  ], sentencePool: [
+    ['Thank you very much', '非常謝謝你'], ['My brother likes rainy weather', '我哥哥喜歡下雨天'], ['Three little birds', '三隻小鳥'],
+    ['The river is very long', '這條河很長'], ['I really love my family', '我真的很愛我的家人'], ['There is a rainbow over the river', '河上有一道彩虹'],
+  ]},
+  { name: '超難單字', perRound: 8, sentences: 2, words: [
+    ['temperature', '溫度', '🌡️'], ['comfortable', '舒服的', '🛋️'], ['squirrel', '松鼠', '🐿️'], ['February', '二月', '📅'], ['hippopotamus', '河馬', '🦛'],
+    ['refrigerator', '冰箱', '🧊'], ['encyclopedia', '百科全書', '📖'], ['pronunciation', '發音', '🗣️'], ['vocabulary', '字彙', '🔤'], ['particularly', '特別地', '🎯'],
+    ['environment', '環境', '🌳'], ['necessary', '必要的', '✅'], ['restaurant', '餐廳', '🍽️'], ['chrysanthemum', '菊花', '🌼'], ['Wednesday', '星期三', '🗓️'],
+    ['rhythm', '節奏', '🥁'], ['opportunity', '機會', '🚪'], ['laboratory', '實驗室', '🧪'], ['anniversary', '週年紀念', '💍'], ['photography', '攝影', '📷'],
+  ], sentencePool: [
+    ['The temperature is very comfortable today', '今天的溫度很舒服'], ['A squirrel is climbing the tree', '一隻松鼠在爬樹'],
+    ['The restaurant is open on Wednesday', '餐廳星期三有營業'], ['Learning vocabulary is necessary', '學習單字是必要的'],
+    ['We should protect our environment', '我們應該保護環境'], ['The refrigerator is full of food', '冰箱裡裝滿了食物'],
+  ]},
+  { name: '🔥 地獄級挑戰', perRound: 8, sentences: 3, minScore: 0.85, words: [
+    ['phenomenon', '現象', '🌌'], ['onomatopoeia', '擬聲詞', '💥'], ['entrepreneur', '企業家', '💼'], ['thoroughly', '徹底地', '🔍'], ['statistics', '統計學', '📊'],
+    ['rural', '鄉村的', '🌾'], ['anemone', '海葵', '🪸'], ['isthmus', '地峽', '🗺️'], ['sixth', '第六', '6️⃣'], ['colonel', '上校', '🎖️'],
+    ['specifically', '具體地', '📌'], ['Massachusetts', '麻薩諸塞州', '🏛️'], ['deteriorate', '惡化', '📉'], ['Worcestershire', '伍斯特郡', '🍶'], ['Mississippi', '密西西比', '🛶'],
+    ['remuneration', '報酬', '💰'], ['Antarctica', '南極洲', '🐧'], ['hierarchy', '階層', '🔺'], ['jewelry', '珠寶', '💎'], ['otorhinolaryngologist', '耳鼻喉科醫師', '👂'],
+  ], sentencePool: [
+    ['She sells seashells by the seashore', '她在海邊賣貝殼'], ['Peter Piper picked a peck of pickled peppers', '彼得派柏挑了一配克的醃辣椒'],
+    ['How much wood would a woodchuck chuck', '土撥鼠能丟多少木頭'], ['Red lorry yellow lorry', '紅卡車黃卡車'],
+    ['Six slippery snails slid slowly seaward', '六隻滑溜的蝸牛慢慢滑向大海'], ['Fuzzy Wuzzy was a bear', '毛毛熊是一隻熊'],
+    ['The sixth sick sheik’s sixth sheep is sick', '第六個生病酋長的第六隻羊生病了'], ['Unique New York unique New York', '獨特的紐約'],
+  ]},
+];
+const SENTENCE_SCORE = 0.8; // 句子至少要念對 80% 的字
+
+const MAX_HEARTS = 3;
+const $ = (id) => document.getElementById(id);
+$('levels').innerHTML = LEVELS.map((_, i) => `<span title="${LEVELS[i].name}">第${i + 1}關</span>`).join('');
+$('pick').innerHTML = LEVELS.map((L, i) => `<button class="secondary" data-i="${i}">第 ${i + 1} 關<small>${L.name}</small><small>${L.words.length} 字＋${L.sentencePool.length} 句</small></button>`).join('');
+// 直接選關：開始畫面的按鈕與上方關卡標籤都能點
+$('pick').onclick = (e) => { const b = e.target.closest('button'); if (b) startLevel(Number(b.dataset.i)); };
+$('levels').onclick = (e) => {
+  const i = [...$('levels').children].indexOf(e.target);
+  if (i < 0) return;
+  speakId++;
+  speechSynthesis.cancel();
+  stopListening();
+  startLevel(i);
+};
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+let levelIdx = 0, wordIdx = 0, hearts = MAX_HEARTS;
+let round = []; // 這次遊玩抽到的題目：{ text, zh, emoji, sentence }
+let rec = null, listening = false, gotResult = false;
+let voice = null;
+let speakId = 0;
+let gen = 0; // 每次開始關卡 +1，讓舊的延遲動作失效
+
+function pickVoice() {
+  const vs = speechSynthesis.getVoices().filter((v) => v.lang.startsWith('en'));
+  voice = vs.find((v) => v.lang === 'en-US' && /Google|Samantha|Jenny|Aria/.test(v.name))
+       || vs.find((v) => v.lang === 'en-US') || vs[0] || null;
+}
+speechSynthesis.onvoiceschanged = pickVoice;
+pickVoice();
+
+// ---------- 爬塔畫面 ----------
+const cv = $('cv'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+const FLOOR_H = 300, WALL_T = 26, HOLE_W = 120, HEAD_H = 72, AV_W = 52;
+const floorY = (i) => -i * FLOOR_H;           // 第 i 層地板頂端的世界座標（往上為負）
+let av = { y: 0, vy: 0, mode: 'stand' };      // y = 頭像腳底；mode: stand | rise | hover | pass | fall
+let door = { open: 0, target: 0, flash: 0 };  // 目前要通過的那道門
+let camY = floorY(0) - (H - 50);
+
+function onSpeechStart() {
+  if (av.mode === 'stand' && listening) av.mode = 'rise';
+}
+
+function tick(dt) {
+  const f = floorY(wordIdx);
+  const hoverY = floorY(wordIdx + 1) + WALL_T + HEAD_H + 10; // 停在門下方
+  const t = performance.now() / 1000;
+  if (av.mode === 'stand') av.y = f;
+  if (av.mode === 'rise') {
+    av.y += (hoverY - av.y) * Math.min(1, dt * 3);
+    if (Math.abs(av.y - hoverY) < 3) av.mode = 'hover';
+  }
+  if (av.mode === 'hover') av.y = hoverY + Math.sin(t * 4) * 4;
+  if (av.mode === 'pass') {
+    // 穿過洞口站上一層
+    const top = floorY(wordIdx + 1);
+    av.y += (top - 4 - av.y) * Math.min(1, dt * 4);
+    if (av.y - top < 2) { av.mode = 'stand'; nextWord(); }
+  }
+  if (av.mode === 'fall') {
+    av.vy += 1500 * dt;
+    av.y += av.vy * dt;
+    if (av.y >= f) { av.y = f; av.vy = 0; av.mode = 'stand'; }
+  }
+  door.open += (door.target - door.open) * Math.min(1, dt * 8);
+  if (door.flash > 0) door.flash -= dt;
+  camY += (floorY(wordIdx) - (H - 50) - camY) * Math.min(1, dt * 3);
+}
+
+// 一整排牆，中間是洞；state: 'floor' 已通過 | 'door' 目前的門 | 'locked' 之後的門
+function drawWall(j, state) {
+  const y = floorY(j) - camY;
+  if (y < -WALL_T - 80 || y > H + 10) return;
+  const hx = W / 2 - HOLE_W / 2;
+  if (j === 0) {
+    g.fillStyle = '#7cc142'; g.fillRect(0, y, W, 10);
+    g.fillStyle = '#8d5a3b'; g.fillRect(0, y + 10, W, H);
+    return;
+  }
+  g.fillStyle = '#b5651d';
+  g.fillRect(0, y, W, WALL_T);
+  g.strokeStyle = '#7f4513'; g.lineWidth = 2;
+  for (let x = 0; x < W; x += 40) g.strokeRect(x + ((j % 2) * 20), y, 40, WALL_T);
+  if (state === 'floor') return;
+  // 洞口與門
+  const open = state === 'door' ? door.open : 0;
+  g.fillStyle = '#2b2d42';
+  g.fillRect(hx, y, HOLE_W, WALL_T);
+  const dw = (HOLE_W / 2) * (1 - open); // 門往兩邊滑開
+  const red = state === 'door' && door.flash > 0 && Math.floor(door.flash * 10) % 2 === 0;
+  g.fillStyle = red ? '#f03e3e' : state === 'door' ? '#ffcf4a' : '#adb5bd';
+  g.fillRect(hx, y, dw, WALL_T);
+  g.fillRect(hx + HOLE_W - dw, y, dw, WALL_T);
+  if (open < 0.5) {
+    g.font = '20px sans-serif'; g.textAlign = 'center';
+    const w = round[j - 1];
+    g.fillText(red ? '❌' : state === 'door' ? '🔒' : w ? w.emoji : '', W / 2, y + 20);
+  }
+  // 最上層插終點旗
+  if (j === round.length) {
+    g.fillStyle = '#e9ecef'; g.fillRect(W / 2 + 160, y - 70, 4, 70);
+    g.fillStyle = '#40c057';
+    g.beginPath(); g.moveTo(W / 2 + 164, y - 70); g.lineTo(W / 2 + 200, y - 58); g.lineTo(W / 2 + 164, y - 46); g.fill();
+  }
+}
+
+function drawAvatar() {
+  const y = av.y - camY;
+  const cy = y - HEAD_H / 2;
+  const flying = av.mode === 'rise' || av.mode === 'hover' || av.mode === 'pass';
+  if (flying) {
+    const flap = Math.sin(performance.now() / 50) * 0.5;
+    g.fillStyle = '#fff'; g.strokeStyle = '#adb5bd'; g.lineWidth = 1.5;
+    for (const side of [-1, 1]) {
+      g.save();
+      g.translate(W / 2 + side * 24, cy + 12);
+      g.rotate(side * (-0.5 + flap));
+      g.beginPath(); g.ellipse(side * 14, 0, 18, 9, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.restore();
+    }
+  }
+  const bob = av.mode === 'stand' ? Math.abs(Math.sin(performance.now() / 300)) * 3 : 0;
+  if (!drawHead(g, W / 2, cy - bob, HEAD_H)) {
+    g.fillStyle = '#ffd43b';
+    g.beginPath(); g.arc(W / 2, cy, AV_W / 2, 0, Math.PI * 2); g.fill();
+  }
+}
+
+function draw() {
+  const sky = g.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#5ec8ff'); sky.addColorStop(1, '#d0ebff');
+  g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  // 雲（視差）
+  g.fillStyle = 'rgba(255,255,255,.8)';
+  for (let i = 0; i < 6; i++) {
+    const x = (i * 157) % W + 40, y = ((i * 97 - camY * 0.3) % (H + 100) + H + 100) % (H + 100) - 50;
+    g.beginPath(); g.arc(x, y, 18, 0, 7); g.arc(x + 22, y - 8, 22, 0, 7); g.arc(x + 46, y, 16, 0, 7); g.fill();
+  }
+  const n = round.length;
+  for (let j = Math.max(0, wordIdx - 1); j <= Math.min(n, wordIdx + 2); j++) {
+    drawWall(j, j <= wordIdx ? 'floor' : j === wordIdx + 1 ? 'door' : 'locked');
+  }
+  drawAvatar();
+  g.fillStyle = 'rgba(0,0,0,.35)';
+  g.beginPath(); g.roundRect(10, 10, 130, 34, 10); g.fill();
+  g.fillStyle = '#fff'; g.font = 'bold 16px sans-serif'; g.textAlign = 'left';
+  g.fillText(`🏢 ${Math.min(wordIdx, n)} / ${n} 層`, 22, 33);
+}
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  tick(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function overlay(title, text, btn, onClick) {
+  $('ovTitle').textContent = title;
+  $('ovText').innerHTML = text;
+  $('ovBtn').textContent = btn;
+  $('ovBtn').onclick = onClick;
+  $('ov').classList.add('show');
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+// 從題庫隨機抽單字，並隨機插入句子
+function makeRound(L) {
+  const words = shuffle(L.words).slice(0, L.perRound - L.sentences)
+    .map(([text, zh, emoji]) => ({ text, zh, emoji, sentence: false }));
+  const sentences = shuffle(L.sentencePool).slice(0, L.sentences)
+    .map(([text, zh]) => ({ text, zh, emoji: '💬', sentence: true }));
+  return shuffle([...words, ...sentences]);
+}
+
+function current() { return round[wordIdx]; }
+
+function render() {
+  const q = current();
+  $('emoji').textContent = q.emoji;
+  $('word').textContent = q.text;
+  $('word').classList.toggle('sentence', q.sentence);
+  $('zh').textContent = q.zh;
+  $('hearts').textContent = '❤️'.repeat(hearts) + '🤍'.repeat(MAX_HEARTS - hearts);
+  $('levelName').textContent = `第 ${levelIdx + 1} 關：${LEVELS[levelIdx].name}　${wordIdx + 1} / ${round.length}${q.sentence ? '　💬 句子題' : ''}`;
+  $('dots').innerHTML = round
+    .map((_, i) => `<i class="${i < wordIdx ? 'ok' : i === wordIdx ? 'cur' : ''}"></i>`).join('');
+  [...$('levels').children].forEach((el, i) => {
+    el.className = i < levelIdx ? 'done' : i === levelIdx ? 'on' : '';
+  });
+}
+
+function setButtons(on) {
+  ['speakBtn', 'micBtn', 'slowBtn'].forEach((id) => ($(id).disabled = !on));
+}
+
+// 念出單字，念完後自動開始收音
+function speak(rate = 0.85, autoListen = true) {
+  stopListening();
+  speechSynthesis.cancel();
+  setButtons(false);
+  $('status').textContent = '🔊 仔細聽…';
+  $('heard').textContent = '';
+  const u = new SpeechSynthesisUtterance(current().text);
+  u.lang = 'en-US';
+  if (voice) u.voice = voice;
+  u.rate = rate;
+  const id = ++speakId;
+  const finish = () => {
+    if (id !== speakId) return; // 已被新的播放取代
+    speakId++;
+    setButtons(true);
+    if (autoListen) { const lid = speakId; setTimeout(() => lid === speakId && listen(), 250); } else $('status').textContent = '按 🎤 換你念';
+  };
+  u.onend = finish;
+  u.onerror = finish;
+  setTimeout(finish, 3500); // 某些瀏覽器 onend 不觸發的保險
+  speechSynthesis.speak(u);
+}
+
+// 語音辨識常把數字寫成阿拉伯數字（3、6th、1000），先轉回英文單字再比對
+const NUM_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+const ORDINALS = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
+
+function normalize(s) {
+  return s.toLowerCase()
+    .replace(/\b(\d+)(st|nd|rd|th)\b/g, (m, n) => ORDINALS[n] || m)
+    .replace(/\b1,?000\b/g, 'one thousand')
+    .replace(/\b\d+\b/g, (n) => NUM_WORDS[n] || n)
+    .replace(/[^a-z\s']/g, ' ').split(/\s+/).filter(Boolean);
+}
+
+function isMatch(alts, target) {
+  return alts.some((t) => {
+    const words = normalize(t);
+    return words.includes(target) || words.includes(target + 's') || words.join('') === target;
+  });
+}
+
+// 句子：計算念對的字的比例，回傳最好的那個辨識結果
+function sentenceScore(alts, target) {
+  const want = normalize(target);
+  let best = { score: 0, missing: want };
+  for (const t of alts) {
+    const got = normalize(t);
+    const missing = want.filter((w) => {
+      const i = got.indexOf(w);
+      if (i < 0) return true;
+      got.splice(i, 1);
+      return false;
+    });
+    const score = 1 - missing.length / want.length;
+    if (score > best.score) best = { score, missing };
+  }
+  return best;
+}
+
+function listen() {
+  if (listening) return;
+  rec = new SR();
+  rec.lang = 'en-US';
+  rec.interimResults = false;
+  rec.maxAlternatives = 5;
+  gotResult = false;
+
+  rec.onstart = () => {
+    listening = true;
+    $('micBtn').classList.add('listening');
+    $('micBtn').textContent = '🎙️ 收音中…';
+    $('status').textContent = '🎤 換你念！';
+  };
+  rec.onsoundstart = onSpeechStart;
+  rec.onspeechstart = onSpeechStart;
+  rec.onresult = (e) => {
+    gotResult = true;
+    const alts = [...e.results[0]].map((a) => a.transcript.trim());
+    onHeard(alts);
+  };
+  rec.onerror = (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      showError($('err'), '麥克風權限被拒絕，請在網址列允許麥克風後重新整理。');
+    } else if (e.error === 'network') {
+      showError($('err'), '語音辨識需要網路連線（Chrome 使用線上辨識服務）。');
+    }
+  };
+  rec.onend = () => {
+    listening = false;
+    $('micBtn').classList.remove('listening');
+    $('micBtn').textContent = '🎤 換我念';
+    if (!gotResult) {
+      $('status').textContent = '沒有聽到聲音，按 🎤 再試一次';
+      if (av.mode === 'rise' || av.mode === 'hover') av.mode = 'fall';
+    }
+  };
+  rec.start();
+}
+
+function stopListening() {
+  if (rec && listening) { rec.onresult = null; rec.abort(); }
+}
+
+function onHeard(alts) {
+  const q = current();
+  let ok;
+  if (q.sentence) {
+    const r = sentenceScore(alts, q.text.replace(/’/g, "'"));
+    ok = r.score >= (LEVELS[levelIdx].minScore || SENTENCE_SCORE);
+    $('heard').textContent = `系統聽到：「${alts[0]}」　念對 ${Math.round(r.score * 100)}%` +
+      (r.missing.length ? `，沒聽到：${r.missing.join(', ')}` : '');
+  } else {
+    ok = isMatch(alts, q.text.toLowerCase());
+    $('heard').textContent = `系統聽到：「${alts[0]}」`;
+  }
+  if (ok) {
+    sfx('good');
+    $('status').innerHTML = '<span class="good">✅ 太棒了，念對了！門打開了！</span>';
+    setButtons(false);
+    door.target = 1;
+    { const my = gen; setTimeout(() => { if (my === gen) av.mode = 'pass'; }, 300); } // 門打開後穿過去，站上去時會呼叫 nextWord
+  } else {
+    sfx('bad');
+    hearts--;
+    render();
+    door.flash = 0.8;
+    av.vy = 0;
+    av.mode = 'fall';
+    $('stage').classList.remove('shake'); void $('stage').offsetWidth; $('stage').classList.add('shake');
+    if (hearts <= 0) {
+      setButtons(false);
+      { const my = gen; setTimeout(() => my === gen && overlay('💔 愛心用完了', `第 ${levelIdx + 1} 關失敗，再挑戰一次吧！`, '重新挑戰', () => startLevel(levelIdx)), 900); }
+    } else {
+      $('status').innerHTML = '<span class="bad">❌ 不太對喔，再聽一次試試看</span>';
+      { const my = gen; setTimeout(() => my === gen && speak(0.75), 1400); }
+    }
+  }
+}
+
+function nextWord() {
+  wordIdx++;
+  if (wordIdx >= round.length) {
+    sfx('win');
+    if (levelIdx + 1 >= LEVELS.length) {
+      [...$('levels').children].forEach((el) => (el.className = 'done'));
+      overlay('🏆 全部通關！', '你的英文發音超棒！', '從第 1 關重玩', () => startLevel(0));
+    } else {
+      overlay(`🎉 第 ${levelIdx + 1} 關過關！`, `下一關：${LEVELS[levelIdx + 1].name}`, `挑戰第 ${levelIdx + 2} 關`, () => startLevel(levelIdx + 1));
+    }
+    return;
+  }
+  door = { open: 0, target: 0, flash: 0 };
+  render();
+  speak();
+}
+
+function startLevel(i) {
+  $('ov').classList.remove('show');
+  if (!SR) {
+    showError($('err'), '此瀏覽器不支援語音辨識，請改用 Chrome 或 Edge。');
+    return;
+  }
+  if (!Mic.ctx) Mic.ctx = new (window.AudioContext || window.webkitAudioContext)(); // 只用來播放音效
+  gen++;
+  levelIdx = i; wordIdx = 0; hearts = MAX_HEARTS;
+  round = makeRound(LEVELS[i]);
+  av = { y: floorY(0), vy: 0, mode: 'stand' };
+  door = { open: 0, target: 0, flash: 0 };
+  camY = floorY(0) - (H - 50);
+  render();
+  speak();
+}
+
+$('ovBtn').onclick = () => startLevel(0);
+$('speakBtn').onclick = () => speak(0.85);
+$('slowBtn').onclick = () => speak(0.5);
+$('micBtn').onclick = () => { speakId++; if (listening) stopListening(); else { speechSynthesis.cancel(); listen(); } };
+</script>
+</body>
+</html>

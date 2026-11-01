@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="380" viewBox="0 0 300 380">
+  <!-- Q版 Cody：黑色蓬鬆短髮、笑瞇瞇大眼、露牙笑容、綠色帽T -->
+  <defs>
+    <!-- 用整張圖的座標，臉和下眼皮的膚色才會接得上 -->
+    <radialGradient id="skin" gradientUnits="userSpaceOnUse" cx="150" cy="175" r="135">
+      <stop offset="0" stop-color="#ffe3c8"/>
+      <stop offset="1" stop-color="#f6c9a0"/>
+    </radialGradient>
+    <linearGradient id="hair" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b2f3a"/>
+      <stop offset="1" stop-color="#14161c"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 綠色帽T -->
+  <path d="M40 380 C40 320 80 292 150 292 C220 292 260 320 260 380 Z" fill="#2f9e44"/>
+  <path d="M78 330 C100 304 200 304 222 330 C200 318 100 318 78 330 Z" fill="#237a35"/>
+  <path d="M120 300 L128 340 M180 300 L172 340" stroke="#e9f5ec" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- 耳朵 -->
+  <ellipse cx="46" cy="200" rx="18" ry="24" fill="#f6c9a0"/>
+  <ellipse cx="254" cy="200" rx="18" ry="24" fill="#f6c9a0"/>
+  <ellipse cx="48" cy="200" rx="9" ry="13" fill="#eab48a"/>
+  <ellipse cx="252" cy="200" rx="9" ry="13" fill="#eab48a"/>
+
+  <!-- 臉 -->
+  <path d="M50 170 C50 110 95 78 150 78 C205 78 250 110 250 170 C250 250 210 300 150 300 C90 300 50 250 50 170 Z" fill="url(#skin)"/>
+
+  <!-- 頭髮：蓬鬆、瀏海往一側翹 -->
+  <path d="M38 175 C26 110 52 40 120 26 C150 8 205 14 236 42 C266 70 274 120 262 178
+           C256 150 250 132 240 120
+           L236 150 L218 112 L206 146 L190 104 L176 142 L160 100 L146 140 L128 102 L112 144 L96 110 L84 150 L70 118
+           C58 132 46 150 38 175 Z" fill="url(#hair)"/>
+  <!-- 翹起來的呆毛 -->
+  <path d="M150 28 C146 10 160 0 172 6 C160 8 156 18 158 30 Z" fill="#14161c"/>
+  <!-- 髮絲高光（照片裡的藍色反光） -->
+  <path d="M176 40 C206 46 230 66 240 96" stroke="#5b7bd5" stroke-width="7" fill="none" stroke-linecap="round" opacity=".55"/>
+  <path d="M90 56 C110 44 130 40 150 42" stroke="#5b7bd5" stroke-width="5" fill="none" stroke-linecap="round" opacity=".35"/>
+
+  <!-- 眉毛 -->
+  <path d="M84 162 C96 154 112 154 124 160" stroke="#2b2f3a" stroke-width="6" fill="none" stroke-linecap="round"/>
+  <path d="M176 160 C188 154 204 154 216 162" stroke="#2b2f3a" stroke-width="6" fill="none" stroke-linecap="round"/>
+
+  <!-- 眼睛：笑瞇瞇的大眼 -->
+  <ellipse cx="104" cy="188" rx="17" ry="19" fill="#2b1d16"/>
+  <ellipse cx="196" cy="188" rx="17" ry="19" fill="#2b1d16"/>
+  <circle cx="110" cy="181" r="6" fill="#fff"/>
+  <circle cx="202" cy="181" r="6" fill="#fff"/>
+  <circle cx="99" cy="194" r="2.5" fill="#fff"/>
+  <circle cx="191" cy="194" r="2.5" fill="#fff"/>
+  <!-- 笑起來時下眼皮往上推 -->
+  <path d="M84 204 C96 196 112 196 124 204 L124 212 L84 212 Z" fill="url(#skin)"/>
+  <path d="M176 204 C188 196 204 196 216 204 L216 212 L176 212 Z" fill="url(#skin)"/>
+
+  <!-- 腮紅 -->
+  <ellipse cx="80" cy="228" rx="18" ry="10" fill="#ff8fa3" opacity=".45"/>
+  <ellipse cx="220" cy="228" rx="18" ry="10" fill="#ff8fa3" opacity=".45"/>
+
+  <!-- 鼻子 -->
+  <path d="M144 218 C148 224 154 224 158 218" stroke="#d9956b" stroke-width="4" fill="none" stroke-linecap="round"/>
+
+  <!-- 露牙大笑 -->
+  <path d="M104 238 C120 280 180 280 196 238 C170 248 130 248 104 238 Z" fill="#9c2f3a"/>
+  <path d="M112 242 C135 250 165 250 188 242 L184 254 C160 260 140 260 116 254 Z" fill="#fff"/>
+  <!-- 門牙之間的小縫 -->
+  <path d="M150 246 L150 257" stroke="#e8d9d0" stroke-width="2.5"/>
+  <path d="M134 246 L134 256 M166 246 L166 256" stroke="#e8d9d0" stroke-width="1.5"/>
+  <ellipse cx="150" cy="266" rx="20" ry="6" fill="#ff8095"/>
+</svg>

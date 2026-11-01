@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>表情飛行</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <button id="mute" title="靜音（M）">🔊</button>
+  <a id="home" href="../">⬅ 首頁</a>
+
+  <div id="cam-box">
+    <video id="cam" autoplay playsinline muted></video>
+    <div class="meter"><span>嘴</span><div class="bar"><div id="mouth-bar"></div></div></div>
+    <div class="meter"><span>笑</span><div class="bar"><div id="smile-bar"></div></div></div>
+    <div class="meter"><span>歪</span><div class="bar center"><div id="tilt-bar"></div></div></div>
+  </div>
+
+  <div id="overlay">
+    <h1>表情飛行</h1>
+    <p id="status">載入臉部模型中…</p>
+    <ul class="help">
+      <li>😮 <b>張嘴</b>：往上飛（張越大推力越強）</li>
+      <li>😄 <b>微笑</b>：開啟護盾（消耗能量）</li>
+      <li>🙃 <b>歪頭</b>：左右歪頭控制前進／後退</li>
+      <li>⭐ 收集星星、避開雷雲</li>
+    </ul>
+    <p class="hint">沒有鏡頭？鍵盤：空白鍵 = 上升、S = 護盾、← → = 前後、M = 靜音</p>
+    <p class="hint">🔊 瀏覽器要先點一下畫面或按任意鍵才會出聲</p>
+    <div class="buttons">
+      <button id="start" disabled>開始</button>
+      <button id="recalib" class="secondary" disabled>重新校正</button>
+    </div>
+
+    <div id="calib" hidden>
+      <div class="calib-steps"><span>1</span><span>2</span><span>3</span></div>
+      <div id="calib-icon">😐</div>
+      <h2 id="calib-title"></h2>
+      <p id="calib-desc"></p>
+      <div class="calib-progress"><div id="calib-bar"></div></div>
+    </div>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>
